@@ -138,7 +138,7 @@ def __gather_interpolation(
         keyframes,
         export_settings):
     # TODOPointer
-    return export_settings['gltf_sampling_interpolation_fallback']
+    return node_channel_interpolation if node_channel_interpolation else export_settings['gltf_sampling_interpolation_fallback']
 
 
 def __convert_to_gltf(value):

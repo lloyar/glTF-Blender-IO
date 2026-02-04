@@ -171,7 +171,7 @@ def __filter_texture_info(primary_socket, blender_shader_sockets, filter_type, e
 def __gather_extensions(texture_transform, export_settings):
     if texture_transform is None:
         return None
-    extension = Extension("KHR_texture_transform", texture_transform)
+    extension = Extension("KHR_texture_transform", texture_transform, False)
     return {"KHR_texture_transform": extension}
 
 

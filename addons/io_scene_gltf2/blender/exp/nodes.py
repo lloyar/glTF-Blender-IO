@@ -83,6 +83,13 @@ def gather_node(vnode, export_settings):
 
     vnode.node = node
 
+    # If we prepared any KHR_animation_pointer path on this node, store it now under the nodes bucket
+    if blender_object is not None and 'current_paths' in export_settings and len(export_settings['current_paths']) > 0:
+        export_settings['KHR_animation_pointer']['nodes'][id(blender_object)] = {}
+        export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'] = export_settings['current_paths'].copy()
+        export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['glTF_node'] = node
+        export_settings['current_paths'] = {}
+
     return node
 
 
@@ -246,6 +253,32 @@ def __gather_extensions(vnode, export_settings):
                 export_settings['KHR_animation_pointer']['lights'][id(blender_lamp)]['glTF_light'] = light_extension
 
             export_settings['current_paths'] = {}
+
+    # KHR_node_visibility: export default visibility state and prepare animation pointer path
+    if blender_object is not None:
+        try:
+            visible = not blender_object.hide_render
+        except Exception:
+            visible = True
+        if not visible:
+            extensions["KHR_node_visibility"] = gltf2_io_extensions.Extension(
+                name="KHR_node_visibility",
+                extension={
+                    "visible": visible
+                },
+                required=False
+            )
+
+        # If Animation Pointer export is enabled, register a pointer path to visibility
+        if export_settings.get('gltf_export_anim_pointer') is True:
+            # Storing path for KHR_animation_pointer (use hide_render property, reversed to get visible)
+            path_ = {}
+            path_['length'] = 1
+            path_['path'] = "/nodes/XXX/extensions/KHR_node_visibility/visible"
+            # path_['reverse'] = True
+            # Use a simple key for cache; we will handle evaluation in sampling_cache
+            export_settings.setdefault('current_paths', {})
+            export_settings['current_paths']["hide_render"] = path_
 
     return extensions if extensions else None
 

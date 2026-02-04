@@ -140,6 +140,11 @@ def gather_data_sampled_keyframes(
 
             # innerConeAngle is handled in cache retrieval, as it requires spot_size and spot_blend
 
+        elif blender_type_data == "nodes":
+            # For nodes, we may need to reverse hide_render -> visible
+            # if export_settings['KHR_animation_pointer']['nodes'][blender_id]['paths'][channel].get('reverse', False) is True:
+            value = 1.0 - value
+
         # Camera yvof is calculated in cache retrieval, as it requires sensor_fit, angle, aspect ratio
 
         key.value_total = value
@@ -151,7 +156,7 @@ def gather_data_sampled_keyframes(
         return None
 
     cst = fcurve_is_constant(keyframes)
-    return None if cst is True else keyframes
+    return [keyframes[0], keyframes[-1]] if cst is True else keyframes
 
 
 def fcurve_is_constant(keyframes):

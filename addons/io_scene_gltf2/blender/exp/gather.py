@@ -14,6 +14,7 @@
 
 import bpy
 
+from .animation.filter import filter_animation
 from ...io.com import gltf2_io
 from ...io.exp.user_extensions import export_user_extensions
 from ..com.extras import generate_extras
@@ -78,6 +79,7 @@ def __gather_scene(blender_scene, export_settings):
     export_settings['KHR_animation_pointer']['materials'] = {}
     export_settings['KHR_animation_pointer']['lights'] = {}
     export_settings['KHR_animation_pointer']['cameras'] = {}
+    export_settings['KHR_animation_pointer']['nodes'] = {}
 
     vtree = gltf2_blender_gather_tree.VExportTree(export_settings)
     vtree.construct(blender_scene)
@@ -148,6 +150,9 @@ def __gather_scene(blender_scene, export_settings):
     vtree.add_neutral_bones()
 
     export_user_extensions('gather_scene_hook', export_settings, scene, blender_scene)
+
+    if export_settings['gltf_export_anim_pointer'] is True:
+        filter_animation(export_settings)
 
     return scene
 

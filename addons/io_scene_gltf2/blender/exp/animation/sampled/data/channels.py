@@ -24,7 +24,9 @@ def gather_data_sampled_channels(blender_type_data, blender_id, blender_action_n
                                  additional_key, export_settings) -> typing.List[gltf2_io.AnimationChannel]:
     channels = []
 
-    list_of_animated_data_channels = {}  # TODOPointer
+    list_of_animated_data_channels = {
+        "hide_render": "CONSTANT"
+    }
 
     baseColorFactor_alpha_merged_already_done = False
     for path in export_settings['KHR_animation_pointer'][blender_type_data][blender_id]['paths'].keys():

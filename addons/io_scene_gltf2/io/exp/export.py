@@ -72,6 +72,7 @@ def save_gltf(gltf, export_settings, encoder, glb_buffer):
     gltf_ordered = OrderedDict(sorted(gltf.items(), key=lambda item: sort_order.index(item[0])))
     gltf_encoded = json.dumps(
         gltf_ordered,
+        ensure_ascii=False,
         indent=gltf_format.indent,
         separators=gltf_format.separators,
         cls=encoder,

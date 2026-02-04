@@ -50,6 +50,8 @@ def __gather_node(blender_type_data, blender_id, export_settings):
         return export_settings['KHR_animation_pointer']['lights'][blender_id]['glTF_light']
     elif blender_type_data == "cameras":
         return export_settings['KHR_animation_pointer']['cameras'][blender_id]['glTF_camera']
+    elif blender_type_data == "nodes":
+        return export_settings['KHR_animation_pointer']['nodes'][blender_id]['glTF_node']
     else:
         pass  # This should never happen
 

@@ -88,6 +88,7 @@ def get_cache_data(path: str,
             material_caching(data, action_name, slot_identifier, frame, export_settings)
             light_nodetree_caching(data, action_name, slot_identifier, frame, export_settings)
             camera_caching(data, action_name, slot_identifier, frame, export_settings)
+            node_visibility_caching(data, action_name, slot_identifier, frame, export_settings)
 
         frame += step
 
@@ -128,6 +129,52 @@ def initialize_data_dict(data, key1, key2, key3, key4, key5):
         data[key1][key2][key3] = {}
         data[key1][key2][key3][key4] = {}
         data[key1][key2][key3][key4][key5] = {}
+
+
+def node_visibility_caching(data, action_name, slot_identifier, frame, export_settings):
+    # Cache Blender object visibility for KHR_node_visibility via KHR_animation_pointer
+    for node_id in export_settings['KHR_animation_pointer']['nodes'].keys():
+        if len(export_settings['KHR_animation_pointer']['nodes'][node_id]['paths']) == 0:
+            continue
+
+        blender_objects = [o for o in bpy.data.objects if id(o) == node_id]
+        if len(blender_objects) == 0:
+            continue
+        blender_object = blender_objects[0]
+
+        if node_id not in data.keys():
+            data[node_id] = {}
+
+        # Determine keys depending on mode
+        if blender_object and blender_object.animation_data and blender_object.animation_data.action \
+                and blender_object.animation_data.action_slot \
+                and export_settings['gltf_animation_mode'] in ["ACTIVE_ACTIONS", "ACTIONS"]:
+            key1, key2, key3, key4 = node_id, blender_object.animation_data.action.name, blender_object.animation_data.action_slot.identifier, "value"
+        elif export_settings['gltf_animation_mode'] in ["NLA_TRACKS"]:
+            key1, key2, key3, key4 = node_id, action_name, slot_identifier, "value"
+        else:
+            # Scene baking
+            key1, key2, key3, key4 = node_id, node_id, slot_identifier, "value"
+
+        if key2 not in data[key1].keys():
+            data[key1][key2] = {}
+            data[key1][key2][key3] = {}
+            data[key1][key2][key3][key4] = {}
+            for path in export_settings['KHR_animation_pointer']['nodes'][node_id]['paths'].keys():
+                data[key1][key2][key3][key4][path] = {}
+
+        if key3 not in data[key1][key2].keys():
+            data[key1][key2][key3] = {}
+            data[key1][key2][key3][key4] = {}
+            for path in export_settings['KHR_animation_pointer']['nodes'][node_id]['paths'].keys():
+                data[key1][key2][key3][key4][path] = {}
+
+        # Store hide_render as 1.0 when hidden, 0.0 when visible; will be reversed in keyframes to get 'visible'
+        for path in export_settings['KHR_animation_pointer']['nodes'][node_id]['paths'].keys():
+            if path != "hide_render":
+                continue
+            val = 1.0 if blender_object.hide_render else 0.0
+            data[key1][key2][key3][key4][path][frame] = val
 
 
 def material_caching(data, action_name, slot_identifier, frame, export_settings):
@@ -736,7 +783,7 @@ def camera_caching(data, action_name, slot_identifier, frame, export_settings):
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
             for path in export_settings['KHR_animation_pointer']['cameras'][cam]['paths'].keys():
-                data[key1][key2][key3][ley4][path] = {}
+                data[key1][key2][key3][key4][path] = {}
 
         for path in export_settings['KHR_animation_pointer']['cameras'][cam]['paths'].keys():
             _render = bpy.context.scene.render

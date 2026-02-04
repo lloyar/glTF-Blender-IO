@@ -305,6 +305,8 @@ def bake_data_animation(blender_type_data, blender_id, animation_key, slot_ident
             blender_data_object = [i for i in bpy.data.cameras if id(i) == blender_id][0]
         elif blender_type_data == "lights":
             blender_data_object = [i for i in bpy.data.lights if id(i) == blender_id][0]
+        elif blender_type_data == "nodes":
+            blender_data_object = [obj for obj in bpy.data.objects if id(obj) == blender_id][0]
         else:
             pass  # Should not happen
 
