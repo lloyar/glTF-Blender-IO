@@ -25,7 +25,7 @@ def gather_data_sampled_channels(blender_type_data, blender_id, blender_action_n
     channels = []
 
     list_of_animated_data_channels = {
-        "hide_render": "CONSTANT"
+        "hide_render": "STEP"
     }
 
     baseColorFactor_alpha_merged_already_done = False

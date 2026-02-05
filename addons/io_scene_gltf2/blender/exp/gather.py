@@ -151,7 +151,7 @@ def __gather_scene(blender_scene, export_settings):
 
     export_user_extensions('gather_scene_hook', export_settings, scene, blender_scene)
 
-    if export_settings['gltf_export_anim_pointer'] is True:
+    if export_settings['gltf_animations'] and export_settings['gltf_export_anim_pointer']:
         filter_animation(export_settings)
 
     return scene
