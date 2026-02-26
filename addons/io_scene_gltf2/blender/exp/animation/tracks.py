@@ -716,7 +716,8 @@ def gather_data_track_animations(
         # Export animation
         has_animation = True
         if track_data.on_type == "OBJECT":
-            if 'nla_track_idx' not in export_settings['KHR_animation_pointer']['nodes'][blender_id]['paths']['hide_render']:
+            if ("hide_render" not in export_settings['KHR_animation_pointer']['nodes'][blender_id]['paths']
+                    or 'nla_track_idx' not in export_settings['KHR_animation_pointer']['nodes'][blender_id]['paths']['hide_render']):
                 has_animation = False
             else:
                 has_animation = track_data.tracks[0].idx in \
