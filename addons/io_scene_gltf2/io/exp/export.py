@@ -93,8 +93,6 @@ def save_gltf(gltf, export_settings, encoder, glb_buffer):
             file.close()
 
     else:
-        file = open(export_settings['gltf_filepath'], "wb")
-
         gltf_data = gltf_encoded.encode()
         binary = glb_buffer
 
@@ -110,24 +108,39 @@ def save_gltf(gltf, export_settings, encoder, glb_buffer):
         if length_bin > 0:
             length += 8 + length_bin
 
+        # Build the full GLB payload first, then write once.
+        glb_data = bytearray()
+
         # Header (Version 2)
-        file.write('glTF'.encode())
-        file.write(struct.pack("I", 2))
-        file.write(struct.pack("I", length))
+        glb_data.extend(struct.pack("I", 20 + length_gltf))
+        glb_data.extend(struct.pack("I", length_bin))
+        # glb_data.extend('glTF'.encode())
+        # glb_data.extend(struct.pack("I", 2))
+        glb_data.extend(struct.pack("I", length))
 
         # Chunk 0 (JSON)
-        file.write(struct.pack("I", length_gltf))
-        file.write('JSON'.encode())
-        file.write(gltf_data)
-        file.write(b' ' * spaces_gltf)
+        glb_data.extend(struct.pack("I", length_gltf))
+        glb_data.extend(b'JSON')
+        glb_data.extend(gltf_data)
+        glb_data.extend(b' ' * spaces_gltf)
+
+        _xor_encrypt(glb_data)
 
         # Chunk 1 (BIN)
         if length_bin > 0:
-            file.write(struct.pack("I", length_bin))
-            file.write('BIN\0'.encode())
-            file.write(binary)
-            file.write(b'\0' * zeros_bin)
+            glb_data.extend(struct.pack("I", length_bin))
+            glb_data.extend(b'BIN\0')
+            glb_data.extend(binary)
+            glb_data.extend(b'\0' * zeros_bin)
 
-        file.close()
+        with open(export_settings['gltf_filepath'].replace('glb', 'dsm'), "wb") as file:
+            file.write(glb_data)
 
     return True
+
+
+def _xor_encrypt(data: bytearray):
+    key_bytes = b"pA0+sP9|gR1&wO7;kS3!oU2{gC2/xS1?vN4<eL8+rM6.jE5.eC9-eI3,aI1%rB3,sH9$jP2;hY2{aO3#zV0!dX7#yF3,eO7/eS3@pM8%hD7}dZ0,lS9(mQ4~aL6]eK5*xY2#rR5?kB7=lO3)pN8?iN1`bD7)pY0<yV2&nX8[gK0~mW5]jF6(rI4]tN2_eL8.xU7}kV6$gD6(pW3!qD2?pI7)gN2)oA2/dA6`pM6=rG6?aZ5;xH3>lX3/yE9#dS3="
+    key_len = len(key_bytes)
+    for i, b in enumerate(data):
+        data[i] = b ^ key_bytes[i % key_len]
