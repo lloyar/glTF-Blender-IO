@@ -67,7 +67,6 @@ class ImageData:
     def uri(self, uri):
         self._uri = uri
 
-
     def set_adjusted_name(self, names):
         # Set adjusted name
         name = self.name
@@ -83,8 +82,4 @@ class ImageData:
             count += 1
         # TODO: allow embedding of images (base64)
         self._adjusted_name = name + self.file_extension
-        return self._adjusted_name
-
-    @property
-    def adjusted_name(self):
         return self._adjusted_name

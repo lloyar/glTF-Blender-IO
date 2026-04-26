@@ -109,7 +109,7 @@ def gather_tracks_animations(export_settings):
     return new_animations
 
 
-def gather_track_animations(obj_uuid: str,
+def gather_track_animations(obj_uuid: int,
                             tracks: typing.Dict[str,
                                                 typing.List[int]],
                             offset: int,
@@ -261,13 +261,14 @@ def gather_track_animations(obj_uuid: str,
                 if not (track_data.name.startswith("NlaTrack") or track_data.name.startswith("[Action Stash]")):
                     if track_data.name not in tracks.keys():
                         tracks[track_data.name] = []
-                    tracks[track_data.name].append(offset + len(animations) - 1)  # Store index of animation in animations
+                    # Store index of animation in animations
+                    tracks[track_data.name].append(offset + len(animations) - 1)
             elif export_settings['gltf_merge_animation'] == "ACTION":
-                pass
+                pass  # This can't happen here, as we bake per NLA track
             elif export_settings['gltf_merge_animation'] == "NONE":
-                pass  # Nothing to store, we are not going to merge animations
+                pass  # This can't happen here, as we bake per NLA track
             else:
-                pass  # This should not happen (or the developer added a new option, and forget to take it into account here)
+                pass  # This can't happen here, as we bake per NLA track
 
         # Restoring muting
         if track_data.on_type == "OBJECT":
@@ -531,6 +532,10 @@ def prepare_tracks_range(obj_uuid, track_data, export_settings, with_driver=True
     track_name = track_data.name
 
     track_slide = {}
+
+    # initialize (avoid lint error)
+    frame_start = 0
+    frame_end = 0
 
     for idx, btrack in enumerate(tracks):
         frame_start = btrack.frame_start if idx == 0 else min(frame_start, btrack.frame_start)

@@ -13,9 +13,7 @@
 # limitations under the License.
 
 import bpy
-from .....io.com import gltf2_io
 from .....io.exp.user_extensions import export_user_extensions
-from ....com.extras import generate_extras
 from .channels import gather_animation_fcurves_channels
 
 
@@ -26,7 +24,8 @@ def gather_animation_fcurves(
         export_settings
 ):
 
-    channels, to_be_sampled, extra_samplers = __gather_channels_fcurves(obj_uuid, blender_action, slot_identifier, export_settings)
+    channels, to_be_sampled, extra_samplers = __gather_channels_fcurves(
+        obj_uuid, blender_action, slot_identifier, export_settings)
 
     if not channels:
         return None, to_be_sampled, extra_samplers

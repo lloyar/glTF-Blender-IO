@@ -16,7 +16,6 @@ import bpy
 import typing
 from ......io.exp.user_extensions import export_user_extensions
 from ......io.com import gltf2_io
-from .....com.extras import generate_extras
 from .channels import gather_sk_sampled_channels
 
 
@@ -30,7 +29,8 @@ def gather_action_sk_sampled(object_uuid: str,
     if len(bpy.data.actions) == 0:
         return None
 
-    channels = __gather_channels(object_uuid, blender_action.name if blender_action else cache_key, slot_identifier if blender_action else None, export_settings)
+    channels = __gather_channels(object_uuid, blender_action.name if blender_action else cache_key,
+                                 slot_identifier if blender_action else None, export_settings)
 
     if not channels:
         return None
