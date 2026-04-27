@@ -110,6 +110,8 @@ def get_object_from_datapath(blender_object, data_path: str):
 
 
 def get_channelbag_for_slot(action, slot):
+    if slot is None:
+        return None
     # This is on purpose limited to the first layer and strip. To support more
     # than 1 layer, a rewrite of this operator is needed which ideally would
     # happen in C++.

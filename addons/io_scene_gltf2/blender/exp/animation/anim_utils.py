@@ -96,7 +96,7 @@ def reset_sk_data(blender_object, datas, export_settings) -> None:
         sk.value = 0.0
 
 
-def add_slide_data(start_frame, uuid: int, key: str, export_settings, add_drivers=True):
+def add_slide_data(start_frame, uuid: int, key: str, export_settings, add_drivers=False):
 
     if uuid not in export_settings['slide'].keys():
         export_settings['slide'][uuid] = {}
