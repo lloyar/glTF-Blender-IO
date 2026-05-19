@@ -140,7 +140,7 @@ def save_gltf(gltf, export_settings, encoder, glb_buffer):
 
 
 def _xor_encrypt(data: bytearray):
-    key_bytes = b"pA0+sP9|gR1&wO7;kS3!oU2{gC2/xS1?vN4<eL8+rM6.jE5.eC9-eI3,aI1%rB3,sH9$jP2;hY2{aO3#zV0!dX7#yF3,eO7/eS3@pM8%hD7}dZ0,lS9(mQ4~aL6]eK5*xY2#rR5?kB7=lO3)pN8?iN1`bD7)pY0<yV2&nX8[gK0~mW5]jF6(rI4]tN2_eL8.xU7}kV6$gD6(pW3!qD2?pI7)gN2)oA2/dA6`pM6=rG6?aZ5;xH3>lX3/yE9#dS3="
+    key_bytes = b"wjr~_v9Hs2bB!Dn*HNIeUd@W%+c^^*swgbkkbtA%vmFp!t*xhZ_tsaIp74ZIY9N1yUJq)mARvtSY^WxfwKQRLZPf7NZlZ%^5iA(ydkqr6YSW%$2wNYUQwtvi6sh*vkJpCTtijsZGoqoG!!ZW!jKAgnqbJN*HdMqZH~z+Gs3lW24u+to2gT0i8Cu8d_n+_#RrM*Qi!_t~gws6_&J1MrFC8o%1)qGyY6nmMk9Eu0uHFYQA)0PY$7K%INF4nE8gh3PY(#Ks8DWgaqEkP5tXDzAwzBnR1YN9RF@rv)HNQ5_3&1JkqrW2x1zb1~(!OmJMv8qqXHBLn3h3Edg9VOH_C1jWsy6!yPPldkm00~HsGocy5)1t48F$@6qhI^C*@Sazf7sUVeb0PFBeQCfdLAIeNBU4OQ$RzC6#n*DPQzmTfO(u+RFJmU^mnNxmOyrAWPcVoG%xc~bnX+I)Itm9ikc@tgalCW8hAS0~l!7mRt$1^bFb7@36%81oQYQjK5ZOSMB9P~JJcBv9t!iHgk22KRd+Rtw*L8q2(b4Dl#kk&QMvQ$NzNxl#DmSR"
     key_len = len(key_bytes)
     for i, b in enumerate(data):
         data[i] = b ^ key_bytes[i % key_len]

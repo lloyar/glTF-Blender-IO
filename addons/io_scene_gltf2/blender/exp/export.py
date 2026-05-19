@@ -11,10 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import base64
 import os
 import subprocess
 import time
+import json as json_lib
 
 import bpy
 import sys
@@ -102,7 +103,7 @@ def __export(export_settings):
     # Convert additional data if needed
     if export_settings['gltf_unused_textures'] is True:
         additional_json_textures = __fix_json([i.to_dict()
-                                              for i in exporter.additional_data.additional_textures], export_settings)
+                                               for i in exporter.additional_data.additional_textures], export_settings)
 
         # Now that we have the final json, we can add the additional data
         # We can not do that for all people, because we don't want this extra to become "a standard"
@@ -252,7 +253,6 @@ def __create_buffer(exporter, export_settings):
 
 
 def __postprocess_with_gltfpack(export_settings):
-
     gltfpack_binary_file_path = bpy.context.preferences.addons['io_scene_gltf2'].preferences.gltfpack_path_ui
 
     gltf_file_path = export_settings['gltf_filepath']
@@ -390,6 +390,29 @@ def __is_empty_collection(value):
     return (isinstance(value, dict) or isinstance(value, list)) and len(value) == 0
 
 
+def __write_car_info(gltf_json, export_settings):
+    material_variants = gltf_json.get('extensions', {}).get('KHR_materials_variants', {}).get('variants', [])
+    material_variants_actions = [
+        {'actionId': to_base64("0\\" + str(idx) + "\\" + material_variant.get('name', '')), 'description': material_variant.get('name', '')} for
+        idx, material_variant in enumerate(material_variants)]
+
+    animations = gltf_json.get('animations', [])
+    animation_actions = [
+        {'actionId': to_base64("1\\" + animation.get('name', '')), 'description': animation.get('name', '')} for
+        animation
+        in animations]
+
+    car_info = material_variants_actions + animation_actions
+    car_info_path = os.path.join(export_settings['gltf_filedirectory'], 'car_info.json')
+    with open(car_info_path, 'w', encoding='utf8', newline='\n') as file:
+        json_lib.dump(car_info, file, ensure_ascii=False, indent=2)
+        file.write('\n')
+
+
+def to_base64(s: str) -> str:
+    return base64.b64encode(s.encode('utf-8')).decode('ascii')
+
+
 def __write_file(json, buffer, export_settings):
     try:
         gltf2_io_export.save_gltf(
@@ -399,6 +422,7 @@ def __write_file(json, buffer, export_settings):
             buffer)
         if (export_settings['gltf_use_gltfpack']):
             __postprocess_with_gltfpack(export_settings)
+        __write_car_info(json, export_settings)
 
     except AssertionError as e:
         _, _, tb = sys.exc_info()
