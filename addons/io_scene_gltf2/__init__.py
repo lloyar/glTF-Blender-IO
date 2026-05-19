@@ -791,7 +791,7 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
             "the bones will be exported, even if empty "
             "(minimal animation, 2 keyframes)"
         ),
-        default=True
+        default=False
     )
 
     export_optimize_animation_keep_anim_object: BoolProperty(
@@ -800,7 +800,7 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
             "If all keyframes are identical for object transformations, "
             "force keeping the minimal animation"
         ),
-        default=False
+        default=True
     )
 
     export_optimize_disable_viewport: BoolProperty(
