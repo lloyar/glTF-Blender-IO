@@ -23,7 +23,7 @@ def filter_animation(export_settings):
                 blender_material = blender_object.active_material
                 export_settings['KHR_animation_pointer']['materials'][id(blender_material)]['used'] = True
                 nla_strip: bpy.types.NlaStrip = \
-                blender_material.node_tree.animation_data.nla_tracks[nla_track.idx].strips[0]
+                    blender_material.node_tree.animation_data.nla_tracks[nla_track.idx].strips[0]
             else:
                 continue
 
@@ -37,12 +37,16 @@ def filter_animation(export_settings):
 
                 if track_data.on_type == "OBJECT":
                     if data_path == "hide_render":
-                        export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][data_path]['used'] = True
-                        if 'nla_track_idx' not in export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][data_path]:
+                        export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][data_path][
+                            'used'] = True
+                        if 'nla_track_idx' not in \
+                                export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][
+                                    data_path]:
                             export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][data_path][
                                 'nla_track_idx'] = []
 
-                        export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][data_path]['nla_track_idx'].append(nla_track.idx)
+                        export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][data_path][
+                            'nla_track_idx'].append(nla_track.idx)
 
                 elif track_data.on_type == "NODETREE":
                     node_name = data_path.split('nodes["')[1].split('"]')[0]
@@ -56,6 +60,8 @@ def filter_animation(export_settings):
                             f'node_tree.nodes["{node_name}"].inputs[2].default_value[2]']['used'] = True
                     elif data_path.startswith("nodes[\"Principled BSDF\"].inputs"):
                         # TODO(lloyar): process
+                        export_settings['KHR_animation_pointer']['materials'][id(blender_material)]['paths'][
+                            f'node_tree.{data_path}']['used'] = True
                         pass
                     else:
                         pass
