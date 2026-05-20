@@ -19,6 +19,14 @@ extension_is_required = False
 
 # ===== PropertyGroup =====
 
+class ActionItem(bpy.types.PropertyGroup):
+    name: bpy.props.StringProperty(
+        name="Action Name",
+        description="Name of the action to trigger.",
+        default=""
+    )
+
+
 class DSVirtualCameraProperties(bpy.types.PropertyGroup):
     priority: bpy.props.IntProperty(
         name="Priority",
@@ -164,6 +172,28 @@ class DSVirtualCameraProperties(bpy.types.PropertyGroup):
         default='SMOOTH_STEP'
     )
 
+    on_start_actions: bpy.props.CollectionProperty(
+        name="On Start Actions",
+        description="Actions to trigger when this camera becomes active.",
+        type=ActionItem
+    )
+
+    on_start_actions_index: bpy.props.IntProperty(
+        name="Index",
+        default=0
+    )
+
+    on_complete_actions: bpy.props.CollectionProperty(
+        name="On Complete Actions",
+        description="Actions to trigger when this camera blend completes.",
+        type=ActionItem
+    )
+
+    on_complete_actions_index: bpy.props.IntProperty(
+        name="Index",
+        default=0
+    )
+
 
 # ===== UI Panel (on glTF export panel) =====
 
@@ -177,7 +207,7 @@ def draw_export(context, layout):
 
     # This draws on the glTF export panel, but we need per-camera settings.
     # Show a note directing users to the Camera properties panel.
-    col = body.column(align=True)
+    col = body.column(align=False)
     col.label(text="Configure per-camera settings in:", icon='INFO')
     col.label(text="  Properties > Camera > DS Virtual Camera")
 
@@ -193,7 +223,7 @@ class CAMERA_PT_DSVirtualCamera(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return context.camera is not None
+        return getattr(context, 'camera', None) is not None
 
     def draw(self, context):
         layout = self.layout
@@ -247,12 +277,123 @@ class CAMERA_PT_DSVirtualCamera(bpy.types.Panel):
         layout.prop(props, 'blend_duration')
         layout.prop(props, 'blend_style')
 
+        # On Start Actions
+        layout.separator()
+        layout.label(text="On Start Actions:", icon='PLAY')
+        self._draw_action_list(layout, props, 'on_start_actions', 'on_start_actions_index', 'start_actions')
+
+        # On Complete Actions
+        layout.separator()
+        layout.label(text="On Complete Actions:", icon='CHECKMARK')
+        self._draw_action_list(layout, props, 'on_complete_actions', 'on_complete_actions_index', 'complete_actions')
+
+
+    @staticmethod
+    def _draw_action_list(layout, props, collection_attr, index_attr, list_id):
+        collection = getattr(props, collection_attr)
+        index = getattr(props, index_attr)
+
+        row = layout.row()
+        row.template_list(
+            "UI_UL_list", list_id,
+            props, collection_attr,
+            props, index_attr,
+            rows=3
+        )
+
+        col = row.column(align=True)
+        if collection_attr == 'on_start_actions':
+            col.operator("ds_virtual_camera.start_action_add", icon='ADD', text="")
+            col.operator("ds_virtual_camera.start_action_remove", icon='REMOVE', text="")
+        else:
+            col.operator("ds_virtual_camera.complete_action_add", icon='ADD', text="")
+            col.operator("ds_virtual_camera.complete_action_remove", icon='REMOVE', text="")
+
+
+# ===== Operators =====
+
+class DSVIRTUALCAMERA_OT_start_action_add(bpy.types.Operator):
+    bl_idname = "ds_virtual_camera.start_action_add"
+    bl_label = "Add Start Action"
+    bl_description = "Add a new on-start action entry."
+
+    def execute(self, context):
+        camera = context.camera
+        props = camera.DSVirtualCameraProperties
+        item = props.on_start_actions.add()
+        item.name = ""
+        return {'FINISHED'}
+
+
+class DSVIRTUALCAMERA_OT_start_action_remove(bpy.types.Operator):
+    bl_idname = "ds_virtual_camera.start_action_remove"
+    bl_label = "Remove Start Action"
+    bl_description = "Remove the selected on-start action entry."
+
+    @classmethod
+    def poll(cls, context):
+        camera = getattr(context, 'camera', None)
+        if camera is None:
+            return False
+        props = camera.DSVirtualCameraProperties
+        return len(props.on_start_actions) > 0
+
+    def execute(self, context):
+        camera = context.camera
+        props = camera.DSVirtualCameraProperties
+        idx = props.on_start_actions_index
+        if 0 <= idx < len(props.on_start_actions):
+            props.on_start_actions.remove(idx)
+            props.on_start_actions_index = min(idx, len(props.on_start_actions) - 1)
+        return {'FINISHED'}
+
+
+class DSVIRTUALCAMERA_OT_complete_action_add(bpy.types.Operator):
+    bl_idname = "ds_virtual_camera.complete_action_add"
+    bl_label = "Add Complete Action"
+    bl_description = "Add a new on-complete action entry."
+
+    def execute(self, context):
+        camera = context.camera
+        props = camera.DSVirtualCameraProperties
+        item = props.on_complete_actions.add()
+        item.name = ""
+        return {'FINISHED'}
+
+
+class DSVIRTUALCAMERA_OT_complete_action_remove(bpy.types.Operator):
+    bl_idname = "ds_virtual_camera.complete_action_remove"
+    bl_label = "Remove Complete Action"
+    bl_description = "Remove the selected on-complete action entry."
+
+    @classmethod
+    def poll(cls, context):
+        camera = getattr(context, 'camera', None)
+        if camera is None:
+            return False
+        props = camera.DSVirtualCameraProperties
+        return len(props.on_complete_actions) > 0
+
+    def execute(self, context):
+        camera = context.camera
+        props = camera.DSVirtualCameraProperties
+        idx = props.on_complete_actions_index
+        if 0 <= idx < len(props.on_complete_actions):
+            props.on_complete_actions.remove(idx)
+            props.on_complete_actions_index = min(idx, len(props.on_complete_actions) - 1)
+        return {'FINISHED'}
+
 
 # ===== Registration =====
 
 def register():
+    bpy.utils.register_class(ActionItem)
     bpy.utils.register_class(DSVirtualCameraProperties)
     bpy.utils.register_class(CAMERA_PT_DSVirtualCamera)
+    bpy.utils.register_class(DSVIRTUALCAMERA_OT_start_action_add)
+    bpy.utils.register_class(DSVIRTUALCAMERA_OT_start_action_remove)
+    bpy.utils.register_class(DSVIRTUALCAMERA_OT_complete_action_add)
+    bpy.utils.register_class(DSVIRTUALCAMERA_OT_complete_action_remove)
 
     bpy.types.Camera.DSVirtualCameraProperties = bpy.props.PointerProperty(type=DSVirtualCameraProperties)
 
@@ -267,8 +408,13 @@ def unregister():
 
     del bpy.types.Camera.DSVirtualCameraProperties
 
+    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_complete_action_remove)
+    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_complete_action_add)
+    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_start_action_remove)
+    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_start_action_add)
     bpy.utils.unregister_class(CAMERA_PT_DSVirtualCamera)
     bpy.utils.unregister_class(DSVirtualCameraProperties)
+    bpy.utils.unregister_class(ActionItem)
 
 
 # ===== glTF Export User Extension =====
@@ -331,6 +477,16 @@ class glTF2ExportUserExtension:
             }
         else:
             ext_data["controller"] = "None"
+
+        # on_start_actions
+        ext_data["on_start_actions"] = [
+            item.name for item in props.on_start_actions if item.name.strip()
+        ]
+
+        # on_complete_actions
+        ext_data["on_complete_actions"] = [
+            item.name for item in props.on_complete_actions if item.name.strip()
+        ]
 
         # camera_blend
         ext_data["camera_blend"] = {

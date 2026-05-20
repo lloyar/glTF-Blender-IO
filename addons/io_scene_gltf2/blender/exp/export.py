@@ -393,16 +393,21 @@ def __is_empty_collection(value):
 def __write_car_info(gltf_json, export_settings):
     material_variants = gltf_json.get('extensions', {}).get('KHR_materials_variants', {}).get('variants', [])
     material_variants_actions = [
-        {'actionId': to_base64("0\\" + str(idx) + "\\" + material_variant.get('name', '')), 'description': material_variant.get('name', '')} for
+        {'actionId': to_base64("0\\" + str(idx) + "\\" + material_variant.get('name', '')),
+         'description': material_variant.get('name', '')} for
         idx, material_variant in enumerate(material_variants)]
 
     animations = gltf_json.get('animations', [])
     animation_actions = [
         {'actionId': to_base64("1\\" + animation.get('name', '')), 'description': animation.get('name', '')} for
-        animation
-        in animations]
+        animation in animations]
 
-    car_info = material_variants_actions + animation_actions
+    cameras = gltf_json.get('cameras', [])
+    camera_actions = [
+        {'actionId': to_base64("2\\" + camera.get('name', '')), 'description': camera.get('name', '')} for
+        camera in cameras]
+
+    car_info = material_variants_actions + animation_actions + camera_actions
     car_info_path = os.path.join(export_settings['gltf_filedirectory'], 'car_info.json')
     with open(car_info_path, 'w', encoding='utf8', newline='\n') as file:
         json_lib.dump(car_info, file, ensure_ascii=False, indent=2)
