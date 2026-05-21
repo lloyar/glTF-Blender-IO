@@ -452,8 +452,8 @@ class glTF2ExportUserExtension:
             ext_data["look_at"] = {
                 "Position": [
                     props.look_at_position[0],
-                    props.look_at_position[1],
                     props.look_at_position[2],
+                    - props.look_at_position[1],
                 ]
             }
 
