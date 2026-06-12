@@ -14,6 +14,7 @@
 import base64
 import os
 import subprocess
+import tempfile
 import time
 import json as json_lib
 
@@ -418,6 +419,95 @@ def to_base64(s: str) -> str:
     return base64.b64encode(s.encode('utf-8')).decode('ascii')
 
 
+def __export_environment_map(export_settings):
+    world = bpy.context.scene.world
+    if world is None or world.node_tree is None:
+        return
+
+    for node in world.node_tree.nodes:
+        if node.type == 'TEX_ENVIRONMENT' and node.image is not None:
+            image = node.image
+            filedir = export_settings['gltf_filedirectory']
+
+            if image.packed_file is not None:
+                data = image.packed_file.data
+            elif image.source in ('FILE', 'SEQUENCE') and image.filepath_raw:
+                src_path = bpy.path.abspath(image.filepath_raw)
+                if os.path.isfile(src_path):
+                    with open(src_path, 'rb') as f:
+                        data = f.read()
+                else:
+                    continue
+            else:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_path = os.path.join(tmpdir, 'env_temp.png')
+                    prev_format = image.file_format
+                    prev_path = image.filepath_raw
+                    image.file_format = 'PNG'
+                    image.filepath_raw = tmp_path
+                    image.save()
+                    image.file_format = prev_format
+                    image.filepath_raw = prev_path
+                    with open(tmp_path, 'rb') as f:
+                        data = f.read()
+
+            _, ext = os.path.splitext(image.name)
+            if ext.lower() not in ('.png', '.jpg', '.jpeg', '.hdr', '.exr', '.webp'):
+                ext = '.png'
+
+            temp_dir = os.path.join(filedir, '.temp')
+            os.makedirs(temp_dir, exist_ok=True)
+
+            env_map_name = 'env' + ext
+            dst_path = os.path.join(temp_dir, env_map_name)
+            with open(dst_path, 'wb') as f:
+                f.write(data)
+
+            __run_ibl_prefilter(dst_path, filedir)
+            break
+
+
+def __run_ibl_prefilter(env_map_path, output_dir):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    ibl_tools_dir = os.path.normpath(os.path.join(script_dir, '..', '..', 'ibl_tools'))
+    cli_path = os.path.join(ibl_tools_dir, 'cli.exe')
+    env_tools_path = os.path.join(ibl_tools_dir, 'environment_map_tools.exe')
+
+    temp_dir = os.path.dirname(env_map_path)
+
+    diffuse_path = os.path.join(temp_dir, 'env_diffuse.ktx2')
+    specular_path = os.path.join(temp_dir, 'env_specular.ktx2')
+
+    parent_dir = os.path.dirname(os.path.normpath(output_dir))
+    maps_dir = os.path.join(parent_dir, 'env_maps')
+    os.makedirs(maps_dir, exist_ok=True)
+
+    diffuse_rgb9e5_path = os.path.join(maps_dir, 'env_diffuse_rgb9e5_zstd.ktx2')
+    specular_rgb9e5_path = os.path.join(maps_dir, 'env_specular_rgb9e5_zstd.ktx2')
+
+    subprocess.run([
+        cli_path,
+        '-inputPath', env_map_path,
+        '-outCubeMap', diffuse_path,
+        '-distribution', 'Lambertian',
+        '-cubeMapResolution', '32'
+    ], check=True, cwd=ibl_tools_dir)
+
+    subprocess.run([
+        cli_path,
+        '-inputPath', env_map_path,
+        '-outCubeMap', specular_path,
+        '-distribution', 'GGX',
+        '-cubeMapResolution', '512'
+    ], check=True, cwd=ibl_tools_dir)
+
+    subprocess.run([
+        env_tools_path,
+        '--inputs', '{},{}'.format(diffuse_path, specular_path),
+        '--outputs', '{},{}'.format(diffuse_rgb9e5_path, specular_rgb9e5_path)
+    ], check=True, cwd=ibl_tools_dir)
+
+
 def __write_file(json, buffer, export_settings):
     try:
         gltf2_io_export.save_gltf(
@@ -428,6 +518,7 @@ def __write_file(json, buffer, export_settings):
         if (export_settings['gltf_use_gltfpack']):
             __postprocess_with_gltfpack(export_settings)
         __write_car_info(json, export_settings)
+        __export_environment_map(export_settings)
 
     except AssertionError as e:
         _, _, tb = sys.exc_info()
