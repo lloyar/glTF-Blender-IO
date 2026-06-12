@@ -397,8 +397,8 @@ def register():
 
     bpy.types.Camera.DSVirtualCameraProperties = bpy.props.PointerProperty(type=DSVirtualCameraProperties)
 
-    from io_scene_gltf2 import exporter_extension_layout_draw
-    exporter_extension_layout_draw['DS Virtual Camera'] = draw_export
+    # from io_scene_gltf2 import exporter_extension_layout_draw
+    # exporter_extension_layout_draw['DS Virtual Camera'] = draw_export
 
 
 def unregister():
