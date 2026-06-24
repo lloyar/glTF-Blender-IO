@@ -518,7 +518,8 @@ def __write_file(json, buffer, export_settings):
         if (export_settings['gltf_use_gltfpack']):
             __postprocess_with_gltfpack(export_settings)
         __write_car_info(json, export_settings)
-        __export_environment_map(export_settings)
+        if sys.platform == 'win32':
+            __export_environment_map(export_settings)
 
     except AssertionError as e:
         _, _, tb = sys.exc_info()
