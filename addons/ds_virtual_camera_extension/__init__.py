@@ -172,24 +172,111 @@ class DSVirtualCameraProperties(bpy.types.PropertyGroup):
         default='SMOOTH_STEP'
     )
 
-    on_start_actions: bpy.props.CollectionProperty(
-        name="On Start Actions",
-        description="Actions to trigger when this camera becomes active.",
+    enable_enter_actions: bpy.props.BoolProperty(
+        name="Enable Enter Actions",
+        description="Enable on-enter-start and on-enter-complete action lists.",
+        default=False
+    )
+
+    on_enter_start_actions: bpy.props.CollectionProperty(
+        name="On Enter Start Actions",
+        description="Actions to trigger when this camera starts entering.",
         type=ActionItem
     )
 
-    on_start_actions_index: bpy.props.IntProperty(
+    on_enter_start_actions_index: bpy.props.IntProperty(
         name="Index",
         default=0
     )
 
-    on_complete_actions: bpy.props.CollectionProperty(
-        name="On Complete Actions",
-        description="Actions to trigger when this camera blend completes.",
+    on_enter_complete_actions: bpy.props.CollectionProperty(
+        name="On Enter Complete Actions",
+        description="Actions to trigger when this camera enter completes.",
         type=ActionItem
     )
 
-    on_complete_actions_index: bpy.props.IntProperty(
+    on_enter_complete_actions_index: bpy.props.IntProperty(
+        name="Index",
+        default=0
+    )
+
+    enable_exit_actions: bpy.props.BoolProperty(
+        name="Enable Exit Actions",
+        description="Enable on-exit-start and on-exit-complete action lists.",
+        default=False
+    )
+
+    on_exit_start_actions: bpy.props.CollectionProperty(
+        name="On Exit Start Actions",
+        description="Actions to trigger when this camera starts exiting.",
+        type=ActionItem
+    )
+
+    on_exit_start_actions_index: bpy.props.IntProperty(
+        name="Index",
+        default=0
+    )
+
+    on_exit_complete_actions: bpy.props.CollectionProperty(
+        name="On Exit Complete Actions",
+        description="Actions to trigger when this camera exit completes.",
+        type=ActionItem
+    )
+
+    on_exit_complete_actions_index: bpy.props.IntProperty(
+        name="Index",
+        default=0
+    )
+
+    enable_control_actions: bpy.props.BoolProperty(
+        name="Enable Control Actions",
+        description="Enable on-control-start and on-control-complete action lists.",
+        default=False
+    )
+
+    on_control_start_actions: bpy.props.CollectionProperty(
+        name="On Control Start Actions",
+        description="Actions to trigger when this camera control starts.",
+        type=ActionItem
+    )
+
+    on_control_start_actions_index: bpy.props.IntProperty(
+        name="Index",
+        default=0
+    )
+
+    on_control_complete_actions: bpy.props.CollectionProperty(
+        name="On Control Complete Actions",
+        description="Actions to trigger when this camera control completes.",
+        type=ActionItem
+    )
+
+    on_control_complete_actions_index: bpy.props.IntProperty(
+        name="Index",
+        default=0
+    )
+
+    enable_idle_actions: bpy.props.BoolProperty(
+        name="Enable Idle Actions",
+        description="Enable idle duration and on-idle action list.",
+        default=False
+    )
+
+    idle_duration: bpy.props.FloatProperty(
+        name="Idle Duration",
+        description="Duration in seconds before idle actions are triggered.",
+        default=1.0,
+        min=0.0,
+        soft_max=60.0
+    )
+
+    on_idle_actions: bpy.props.CollectionProperty(
+        name="On Idle Actions",
+        description="Actions to trigger when this camera is idle.",
+        type=ActionItem
+    )
+
+    on_idle_actions_index: bpy.props.IntProperty(
         name="Index",
         default=0
     )
@@ -252,6 +339,12 @@ class CAMERA_PT_DSVirtualCamera(bpy.types.Panel):
 
         layout.prop(props, 'look_at_offset')
 
+        # Camera Blend
+        layout.separator()
+        layout.label(text="Camera Blend:", icon='IPO_EASE_IN_OUT')
+        layout.prop(props, 'blend_duration')
+        layout.prop(props, 'blend_style')
+
         # Controller
         layout.separator()
         layout.label(text="Controller:", icon='CAMERA_DATA')
@@ -271,21 +364,47 @@ class CAMERA_PT_DSVirtualCamera(bpy.types.Panel):
             col.separator()
             col.prop(props, 'smoothing_factor')
 
-        # Camera Blend
-        layout.separator()
-        layout.label(text="Camera Blend:", icon='IPO_EASE_IN_OUT')
-        layout.prop(props, 'blend_duration')
-        layout.prop(props, 'blend_style')
+            # Control Event
+            col.separator()
+            control_box = col.box()
+            control_box.prop(props, 'enable_control_actions')
+            if props.enable_control_actions:
+                control_box.label(text="On Control Start Actions:", icon='PLAY')
+                self._draw_action_list(control_box, props, 'on_control_start_actions', 'on_control_start_actions_index', 'control_start_actions')
+                control_box.separator()
+                control_box.label(text="On Control End Actions:", icon='CHECKMARK')
+                self._draw_action_list(control_box, props, 'on_control_complete_actions', 'on_control_complete_actions_index', 'control_complete_actions')
 
-        # On Start Actions
+        # Idle Event
         layout.separator()
-        layout.label(text="On Start Actions:", icon='PLAY')
-        self._draw_action_list(layout, props, 'on_start_actions', 'on_start_actions_index', 'start_actions')
+        idle_box = layout.box()
+        idle_box.prop(props, 'enable_idle_actions')
+        if props.enable_idle_actions:
+            idle_box.prop(props, 'idle_duration')
+            idle_box.label(text="On Idle Actions:", icon='ACTION')
+            self._draw_action_list(idle_box, props, 'on_idle_actions', 'on_idle_actions_index', 'idle_actions')
 
-        # On Complete Actions
+        # Enter Event
         layout.separator()
-        layout.label(text="On Complete Actions:", icon='CHECKMARK')
-        self._draw_action_list(layout, props, 'on_complete_actions', 'on_complete_actions_index', 'complete_actions')
+        enter_box = layout.box()
+        enter_box.prop(props, 'enable_enter_actions')
+        if props.enable_enter_actions:
+            enter_box.label(text="On Enter Start Actions:", icon='PLAY')
+            self._draw_action_list(enter_box, props, 'on_enter_start_actions', 'on_enter_start_actions_index', 'enter_start_actions')
+            enter_box.separator()
+            enter_box.label(text="On Enter Complete Actions:", icon='CHECKMARK')
+            self._draw_action_list(enter_box, props, 'on_enter_complete_actions', 'on_enter_complete_actions_index', 'enter_complete_actions')
+
+        # Exit Event
+        layout.separator()
+        exit_box = layout.box()
+        exit_box.prop(props, 'enable_exit_actions')
+        if props.enable_exit_actions:
+            exit_box.label(text="On Exit Start Actions:", icon='PLAY')
+            self._draw_action_list(exit_box, props, 'on_exit_start_actions', 'on_exit_start_actions_index', 'exit_start_actions')
+            exit_box.separator()
+            exit_box.label(text="On Exit Complete Actions:", icon='CHECKMARK')
+            self._draw_action_list(exit_box, props, 'on_exit_complete_actions', 'on_exit_complete_actions_index', 'exit_complete_actions')
 
 
     @staticmethod
@@ -302,85 +421,52 @@ class CAMERA_PT_DSVirtualCamera(bpy.types.Panel):
         )
 
         col = row.column(align=True)
-        if collection_attr == 'on_start_actions':
-            col.operator("ds_virtual_camera.start_action_add", icon='ADD', text="")
-            col.operator("ds_virtual_camera.start_action_remove", icon='REMOVE', text="")
-        else:
-            col.operator("ds_virtual_camera.complete_action_add", icon='ADD', text="")
-            col.operator("ds_virtual_camera.complete_action_remove", icon='REMOVE', text="")
+        col.operator("ds_virtual_camera.action_add", icon='ADD', text="").collection = collection_attr
+        col.operator("ds_virtual_camera.action_remove", icon='REMOVE', text="").collection = collection_attr
 
 
 # ===== Operators =====
 
-class DSVIRTUALCAMERA_OT_start_action_add(bpy.types.Operator):
-    bl_idname = "ds_virtual_camera.start_action_add"
-    bl_label = "Add Start Action"
-    bl_description = "Add a new on-start action entry."
+class DSVIRTUALCAMERA_OT_action_add(bpy.types.Operator):
+    bl_idname = "ds_virtual_camera.action_add"
+    bl_label = "Add Action"
+    bl_description = "Add a new action entry."
+
+    collection: bpy.props.StringProperty(
+        name="Collection",
+        description="Name of the collection property to add to.",
+        default=""
+    )
 
     def execute(self, context):
         camera = context.camera
         props = camera.DSVirtualCameraProperties
-        item = props.on_start_actions.add()
+        collection = getattr(props, self.collection)
+        item = collection.add()
         item.name = ""
         return {'FINISHED'}
 
 
-class DSVIRTUALCAMERA_OT_start_action_remove(bpy.types.Operator):
-    bl_idname = "ds_virtual_camera.start_action_remove"
-    bl_label = "Remove Start Action"
-    bl_description = "Remove the selected on-start action entry."
+class DSVIRTUALCAMERA_OT_action_remove(bpy.types.Operator):
+    bl_idname = "ds_virtual_camera.action_remove"
+    bl_label = "Remove Action"
+    bl_description = "Remove the selected action entry."
 
-    @classmethod
-    def poll(cls, context):
-        camera = getattr(context, 'camera', None)
-        if camera is None:
-            return False
-        props = camera.DSVirtualCameraProperties
-        return len(props.on_start_actions) > 0
+    collection: bpy.props.StringProperty(
+        name="Collection",
+        description="Name of the collection property to remove from.",
+        default=""
+    )
 
     def execute(self, context):
         camera = context.camera
         props = camera.DSVirtualCameraProperties
-        idx = props.on_start_actions_index
-        if 0 <= idx < len(props.on_start_actions):
-            props.on_start_actions.remove(idx)
-            props.on_start_actions_index = min(idx, len(props.on_start_actions) - 1)
-        return {'FINISHED'}
-
-
-class DSVIRTUALCAMERA_OT_complete_action_add(bpy.types.Operator):
-    bl_idname = "ds_virtual_camera.complete_action_add"
-    bl_label = "Add Complete Action"
-    bl_description = "Add a new on-complete action entry."
-
-    def execute(self, context):
-        camera = context.camera
-        props = camera.DSVirtualCameraProperties
-        item = props.on_complete_actions.add()
-        item.name = ""
-        return {'FINISHED'}
-
-
-class DSVIRTUALCAMERA_OT_complete_action_remove(bpy.types.Operator):
-    bl_idname = "ds_virtual_camera.complete_action_remove"
-    bl_label = "Remove Complete Action"
-    bl_description = "Remove the selected on-complete action entry."
-
-    @classmethod
-    def poll(cls, context):
-        camera = getattr(context, 'camera', None)
-        if camera is None:
-            return False
-        props = camera.DSVirtualCameraProperties
-        return len(props.on_complete_actions) > 0
-
-    def execute(self, context):
-        camera = context.camera
-        props = camera.DSVirtualCameraProperties
-        idx = props.on_complete_actions_index
-        if 0 <= idx < len(props.on_complete_actions):
-            props.on_complete_actions.remove(idx)
-            props.on_complete_actions_index = min(idx, len(props.on_complete_actions) - 1)
+        collection = getattr(props, self.collection)
+        index_attr = self.collection + "_index"
+        idx = getattr(props, index_attr)
+        if 0 <= idx < len(collection):
+            collection.remove(idx)
+            setattr(props, index_attr, min(idx, len(collection) - 1))
         return {'FINISHED'}
 
 
@@ -390,10 +476,8 @@ def register():
     bpy.utils.register_class(ActionItem)
     bpy.utils.register_class(DSVirtualCameraProperties)
     bpy.utils.register_class(CAMERA_PT_DSVirtualCamera)
-    bpy.utils.register_class(DSVIRTUALCAMERA_OT_start_action_add)
-    bpy.utils.register_class(DSVIRTUALCAMERA_OT_start_action_remove)
-    bpy.utils.register_class(DSVIRTUALCAMERA_OT_complete_action_add)
-    bpy.utils.register_class(DSVIRTUALCAMERA_OT_complete_action_remove)
+    bpy.utils.register_class(DSVIRTUALCAMERA_OT_action_add)
+    bpy.utils.register_class(DSVIRTUALCAMERA_OT_action_remove)
 
     bpy.types.Camera.DSVirtualCameraProperties = bpy.props.PointerProperty(type=DSVirtualCameraProperties)
 
@@ -408,10 +492,8 @@ def unregister():
 
     del bpy.types.Camera.DSVirtualCameraProperties
 
-    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_complete_action_remove)
-    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_complete_action_add)
-    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_start_action_remove)
-    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_start_action_add)
+    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_action_remove)
+    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_action_add)
     bpy.utils.unregister_class(CAMERA_PT_DSVirtualCamera)
     bpy.utils.unregister_class(DSVirtualCameraProperties)
     bpy.utils.unregister_class(ActionItem)
@@ -478,15 +560,51 @@ class glTF2ExportUserExtension:
         else:
             ext_data["controller"] = "None"
 
-        # on_start_actions
-        ext_data["on_start_actions"] = [
-            item.name for item in props.on_start_actions if item.name.strip()
-        ]
+        # on_enter_start_actions
+        if props.enable_enter_actions:
+            ext_data["on_enter_start_actions"] = [
+                item.name for item in props.on_enter_start_actions if item.name.strip()
+            ]
 
-        # on_complete_actions
-        ext_data["on_complete_actions"] = [
-            item.name for item in props.on_complete_actions if item.name.strip()
-        ]
+        # on_enter_complete_actions
+        if props.enable_enter_actions:
+            ext_data["on_enter_complete_actions"] = [
+                item.name for item in props.on_enter_complete_actions if item.name.strip()
+            ]
+
+        # on_exit_start_actions
+        if props.enable_exit_actions:
+            ext_data["on_exit_start_actions"] = [
+                item.name for item in props.on_exit_start_actions if item.name.strip()
+            ]
+
+        # on_exit_complete_actions
+        if props.enable_exit_actions:
+            ext_data["on_exit_complete_actions"] = [
+                item.name for item in props.on_exit_complete_actions if item.name.strip()
+            ]
+
+        # on_control_start_actions
+        if props.enable_control_actions:
+            ext_data["on_control_start_actions"] = [
+                item.name for item in props.on_control_start_actions if item.name.strip()
+            ]
+
+        # on_control_complete_actions
+        if props.enable_control_actions:
+            ext_data["on_control_complete_actions"] = [
+                item.name for item in props.on_control_complete_actions if item.name.strip()
+            ]
+
+        # idle_duration
+        if props.enable_idle_actions:
+            ext_data["idle_duration"] = props.idle_duration
+
+        # on_idle_actions
+        if props.enable_idle_actions:
+            ext_data["on_idle_actions"] = [
+                item.name for item in props.on_idle_actions if item.name.strip()
+            ]
 
         # camera_blend
         ext_data["camera_blend"] = {
