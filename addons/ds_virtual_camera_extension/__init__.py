@@ -281,6 +281,12 @@ class DSVirtualCameraProperties(bpy.types.PropertyGroup):
         default=0
     )
 
+    action_search: bpy.props.StringProperty(
+        name="Action Search",
+        description="Shared search box for the scene's actions; press + next to a list to add the selected variant name to that list.",
+        default=""
+    )
+
 
 # ===== UI Panel (on glTF export panel) =====
 
@@ -297,6 +303,55 @@ def draw_export(context, layout):
     col = body.column(align=False)
     col.label(text="Configure per-camera settings in:", icon='INFO')
     col.label(text="  Properties > Camera > DS Virtual Camera")
+
+
+# ===== Action Name Source =====
+
+def _collect_action_names():
+    names = set()
+    scene = bpy.data.scenes[0] if bpy.data.scenes else None
+    if scene:
+        variants = getattr(scene, "gltf2_KHR_materials_variants_variants", None)
+        if variants:
+            for v in variants:
+                if v.name:
+                    names.add("0\\" + v.name)
+
+    for obj in bpy.data.objects:
+        if obj.animation_data and obj.animation_data.nla_tracks:
+            for track in obj.animation_data.nla_tracks:
+                if track.name:
+                    names.add("1\\" + track.name)
+
+    for cam in bpy.data.cameras:
+        if cam.name:
+            names.add("2\\" + cam.name)
+
+    return sorted(names)
+
+
+class DSVIRTUALCAMERA_MT_action_menu(bpy.types.Menu):
+    bl_label = "Select Action"
+    bl_idname = "DSVIRTUALCAMERA_MT_action_menu"
+
+    def draw(self, context):
+        layout = self.layout
+        names = _collect_action_names()
+        if names:
+            layout.label(text="Select Action:", icon='VIEWZOOM')
+            layout.separator()
+            for name in names:
+                split_row = layout.split(factor=1.0, align=True)
+                op = split_row.operator(
+                    "ds_virtual_camera.action_select",
+                    text=name,
+                    icon='ACTION')
+                op.action_name = name
+                if name != names[-1]:
+                    layout.separator(factor=0.3)
+        else:
+            layout.label(text="No actions found", icon='INFO')
+            layout.label(text="Please create a glTF Variant first")
 
 
 # ===== Camera Properties Panel =====
@@ -421,8 +476,17 @@ class CAMERA_PT_DSVirtualCamera(bpy.types.Panel):
         )
 
         col = row.column(align=True)
-        col.operator("ds_virtual_camera.action_add", icon='ADD', text="").collection = collection_attr
         col.operator("ds_virtual_camera.action_remove", icon='REMOVE', text="").collection = collection_attr
+
+        names = _collect_action_names()
+        if names:
+            row = layout.row(align=True)
+            row.menu("DSVIRTUALCAMERA_MT_action_menu", text="", icon='DOWNARROW_HLT')
+            row.prop(props, "action_search", text="", icon='VIEWZOOM')
+            op = row.operator("ds_virtual_camera.variant_add", icon='ADD', text="")
+            op.collection = collection_attr
+        else:
+            layout.label(text="Please Create a Variant First")
 
 
 # ===== Operators =====
@@ -470,14 +534,74 @@ class DSVIRTUALCAMERA_OT_action_remove(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class DSVIRTUALCAMERA_OT_action_select(bpy.types.Operator):
+    bl_idname = "ds_virtual_camera.action_select"
+    bl_label = "Select Action"
+    bl_description = "Select an action name from the dropdown."
+
+    action_name: bpy.props.StringProperty(
+        name="Action Name",
+        description="Name of the action to select.",
+        default=""
+    )
+
+    def execute(self, context):
+        camera = getattr(context, 'camera', None)
+        if camera is None:
+            return {'CANCELLED'}
+        props = camera.DSVirtualCameraProperties
+        props.action_search = self.action_name
+        return {'FINISHED'}
+
+
+class DSVIRTUALCAMERA_OT_variant_add(bpy.types.Operator):
+    bl_idname = "ds_virtual_camera.variant_add"
+    bl_label = "Add Variant"
+    bl_description = "Add the selected glTF material variant name to this action list."
+
+    collection: bpy.props.StringProperty(
+        name="Collection",
+        description="Name of the collection property to add to.",
+        default=""
+    )
+
+    @classmethod
+    def poll(cls, context):
+        if context.camera is None:
+            return False
+        return len(_collect_action_names()) > 0
+
+    def execute(self, context):
+        camera = context.camera
+        props = camera.DSVirtualCameraProperties
+        search_value = props.action_search
+        if not search_value:
+            self.report({'WARNING'}, "Please select an action first.")
+            return {'CANCELLED'}
+
+        names = _collect_action_names()
+        if search_value not in names:
+            self.report({'WARNING'}, "Action '%s' not found." % search_value)
+            return {'CANCELLED'}
+
+        collection = getattr(props, self.collection)
+        item = collection.add()
+        item.name = search_value
+        props.action_search = ""
+        return {'FINISHED'}
+
+
 # ===== Registration =====
 
 def register():
     bpy.utils.register_class(ActionItem)
     bpy.utils.register_class(DSVirtualCameraProperties)
+    bpy.utils.register_class(DSVIRTUALCAMERA_MT_action_menu)
     bpy.utils.register_class(CAMERA_PT_DSVirtualCamera)
     bpy.utils.register_class(DSVIRTUALCAMERA_OT_action_add)
     bpy.utils.register_class(DSVIRTUALCAMERA_OT_action_remove)
+    bpy.utils.register_class(DSVIRTUALCAMERA_OT_action_select)
+    bpy.utils.register_class(DSVIRTUALCAMERA_OT_variant_add)
 
     bpy.types.Camera.DSVirtualCameraProperties = bpy.props.PointerProperty(type=DSVirtualCameraProperties)
 
@@ -492,9 +616,12 @@ def unregister():
 
     del bpy.types.Camera.DSVirtualCameraProperties
 
+    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_variant_add)
+    bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_action_select)
     bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_action_remove)
     bpy.utils.unregister_class(DSVIRTUALCAMERA_OT_action_add)
     bpy.utils.unregister_class(CAMERA_PT_DSVirtualCamera)
+    bpy.utils.unregister_class(DSVIRTUALCAMERA_MT_action_menu)
     bpy.utils.unregister_class(DSVirtualCameraProperties)
     bpy.utils.unregister_class(ActionItem)
 
