@@ -58,6 +58,247 @@ def add_gltf_settings_to_menu(self, context):
     if bpy.context.preferences.addons['io_scene_gltf2'].preferences.settings_node_ui is True:
         self.layout.operator("node.gltf_settings_node_operator")
 
+
+class DSEnvironmentMapProperties(bpy.types.PropertyGroup):
+    exposure: bpy.props.FloatProperty(
+        name="Exposure",
+        description="EV100 exposure applied by the DS renderer",
+        default=9.7,
+        soft_min=-10.0,
+        soft_max=30.0,
+    )
+    tonemapping: bpy.props.EnumProperty(
+        name="Tonemapping",
+        description="Tonemapping transform applied by the DS renderer",
+        items=[
+            ('None', "None", "Do not apply tonemapping"),
+            ('Reinhard', "Reinhard", "Reinhard tonemapping"),
+            ('ReinhardLuminance', "Reinhard Luminance", "Luminance-preserving Reinhard tonemapping"),
+            ('AcesFitted', "ACES Fitted", "ACES fitted tonemapping"),
+            ('AgX', "AgX", "AgX tonemapping"),
+            (
+                'SomewhatBoringDisplayTransform',
+                "Somewhat Boring Display Transform",
+                "Somewhat Boring Display Transform tonemapping",
+            ),
+            ('TonyMcMapface', "Tony McMapface", "Tony McMapface tonemapping"),
+            ('BlenderFilmic', "Blender Filmic", "Blender Filmic tonemapping"),
+            ('KhronosPbrNeutral', "Khronos PBR Neutral", "Khronos PBR Neutral tonemapping"),
+        ],
+        default='None',
+    )
+    intensity: bpy.props.FloatProperty(
+        name="Intensity",
+        description="Intensity of the prefiltered environment light",
+        default=1100.0,
+        min=0.0,
+        soft_max=5000.0,
+    )
+
+
+class WORLD_PT_ds_environment_map(bpy.types.Panel):
+    bl_label = "DS Environment Map"
+    bl_idname = "WORLD_PT_ds_environment_map"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'world'
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        properties = context.scene.ds_environment_map
+        layout.prop(properties, 'exposure')
+        layout.prop(properties, 'tonemapping')
+        layout.prop(properties, 'intensity')
+        layout.separator()
+        layout.label(text="Uses the first Environment Texture node in the World.", icon='INFO')
+
+
+def on_ds_animation_state_name_update(self, context):
+    scene = context.scene if context is not None else None
+    if scene is None or not hasattr(scene, 'ds_animation_states'):
+        return
+
+    desired_name = self.name or "Animation State"
+    used_names = [
+        state.name for state in scene.ds_animation_states
+        if state.as_pointer() != self.as_pointer()
+    ]
+    unique_name = find_unused_name(used_names, desired_name)
+    if unique_name != self.name:
+        self.name = unique_name
+
+
+class DSAnimationReferenceProperties(bpy.types.PropertyGroup):
+    animation: bpy.props.StringProperty(
+        name="Animation",
+        description="Name of an animation exported to glTF",
+    )
+
+
+class DSAnimationStateProperties(bpy.types.PropertyGroup):
+    name: bpy.props.StringProperty(
+        name="State",
+        description="Action name that triggers this animation state",
+        default="Animation State",
+        update=on_ds_animation_state_name_update,
+    )
+    looping: bpy.props.BoolProperty(
+        name="Looping",
+        description="Repeat the main animation forever",
+        default=False,
+    )
+    starts: bpy.props.CollectionProperty(type=DSAnimationReferenceProperties)
+    stops: bpy.props.CollectionProperty(type=DSAnimationReferenceProperties)
+    starts_active_index: bpy.props.IntProperty(default=0, min=0)
+    stops_active_index: bpy.props.IntProperty(default=0, min=0)
+
+
+class SCENE_UL_ds_animation_states(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.prop(item, "name", text="", emboss=False, icon='ACTION')
+
+
+class SCENE_UL_ds_animation_references(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.prop(item, "animation", text="", emboss=False, icon='ANIM')
+
+
+class SCENE_OT_ds_animation_state_add(bpy.types.Operator):
+    bl_idname = "scene.ds_animation_state_add"
+    bl_label = "Add DS Animation State"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        state = scene.ds_animation_states.add()
+        state.name = find_unused_name(
+            [item.name for item in scene.ds_animation_states if item.as_pointer() != state.as_pointer()],
+            "Animation State",
+        )
+        scene.ds_animation_state_active_index = len(scene.ds_animation_states) - 1
+        return {'FINISHED'}
+
+
+class SCENE_OT_ds_animation_state_remove(bpy.types.Operator):
+    bl_idname = "scene.ds_animation_state_remove"
+    bl_label = "Remove DS Animation State"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.ds_animation_states) > 0
+
+    def execute(self, context):
+        scene = context.scene
+        index = min(scene.ds_animation_state_active_index, len(scene.ds_animation_states) - 1)
+        scene.ds_animation_states.remove(index)
+        scene.ds_animation_state_active_index = max(0, min(index, len(scene.ds_animation_states) - 1))
+        return {'FINISHED'}
+
+
+class SCENE_OT_ds_animation_reference_add(bpy.types.Operator):
+    bl_idname = "scene.ds_animation_reference_add"
+    bl_label = "Add Animation Reference"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    target: bpy.props.EnumProperty(
+        items=[('starts', "Starts", ""), ('stops', "Stops", "")],
+    )
+
+    def execute(self, context):
+        scene = context.scene
+        if not scene.ds_animation_states:
+            return {'CANCELLED'}
+        index = min(scene.ds_animation_state_active_index, len(scene.ds_animation_states) - 1)
+        state = scene.ds_animation_states[index]
+        references = getattr(state, self.target)
+        references.add()
+        setattr(state, self.target + '_active_index', len(references) - 1)
+        return {'FINISHED'}
+
+
+class SCENE_OT_ds_animation_reference_remove(bpy.types.Operator):
+    bl_idname = "scene.ds_animation_reference_remove"
+    bl_label = "Remove Animation Reference"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    target: bpy.props.EnumProperty(
+        items=[('starts', "Starts", ""), ('stops', "Stops", "")],
+    )
+
+    def execute(self, context):
+        scene = context.scene
+        if not scene.ds_animation_states:
+            return {'CANCELLED'}
+        state_index = min(scene.ds_animation_state_active_index, len(scene.ds_animation_states) - 1)
+        state = scene.ds_animation_states[state_index]
+        references = getattr(state, self.target)
+        if not references:
+            return {'CANCELLED'}
+        active_index_name = self.target + '_active_index'
+        index = min(getattr(state, active_index_name), len(references) - 1)
+        references.remove(index)
+        setattr(state, active_index_name, max(0, min(index, len(references) - 1)))
+        return {'FINISHED'}
+
+
+class SCENE_PT_ds_animation_states(bpy.types.Panel):
+    bl_label = "DS Animation States"
+    bl_idname = "SCENE_PT_ds_animation_states"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'scene'
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        row = layout.row()
+        row.template_list(
+            "SCENE_UL_ds_animation_states",
+            "",
+            scene,
+            "ds_animation_states",
+            scene,
+            "ds_animation_state_active_index",
+            rows=5,
+        )
+        column = row.column(align=True)
+        column.operator("scene.ds_animation_state_add", icon='ADD', text="")
+        column.operator("scene.ds_animation_state_remove", icon='REMOVE', text="")
+
+        if not scene.ds_animation_states:
+            layout.label(text="No states; an empty extension will be exported.", icon='INFO')
+            return
+
+        index = min(scene.ds_animation_state_active_index, len(scene.ds_animation_states) - 1)
+        state = scene.ds_animation_states[index]
+        layout.use_property_split = True
+        layout.prop(state, 'name')
+        layout.prop(state, 'looping')
+
+        for label, target, active_index in (
+                ("Starts", "starts", "starts_active_index"),
+                ("Stops", "stops", "stops_active_index")):
+            layout.label(text=label)
+            row = layout.row()
+            row.template_list(
+                "SCENE_UL_ds_animation_references",
+                target,
+                state,
+                target,
+                state,
+                active_index,
+                rows=3,
+            )
+            column = row.column(align=True)
+            operator = column.operator("scene.ds_animation_reference_add", icon='ADD', text="")
+            operator.target = target
+            operator = column.operator("scene.ds_animation_reference_remove", icon='REMOVE', text="")
+            operator.target = target
+
+
 ################################### KHR_materials_variants ####################
 
 # Global UI panel
@@ -686,6 +927,20 @@ def export_panel_animation_action_filter(layout, operator):
 
 def register():
     bpy.utils.register_class(NODE_OT_GLTF_SETTINGS)
+    bpy.utils.register_class(DSEnvironmentMapProperties)
+    bpy.utils.register_class(WORLD_PT_ds_environment_map)
+    bpy.utils.register_class(DSAnimationReferenceProperties)
+    bpy.utils.register_class(DSAnimationStateProperties)
+    bpy.utils.register_class(SCENE_UL_ds_animation_states)
+    bpy.utils.register_class(SCENE_UL_ds_animation_references)
+    bpy.utils.register_class(SCENE_OT_ds_animation_state_add)
+    bpy.utils.register_class(SCENE_OT_ds_animation_state_remove)
+    bpy.utils.register_class(SCENE_OT_ds_animation_reference_add)
+    bpy.utils.register_class(SCENE_OT_ds_animation_reference_remove)
+    bpy.utils.register_class(SCENE_PT_ds_animation_states)
+    bpy.types.Scene.ds_environment_map = bpy.props.PointerProperty(type=DSEnvironmentMapProperties)
+    bpy.types.Scene.ds_animation_states = bpy.props.CollectionProperty(type=DSAnimationStateProperties)
+    bpy.types.Scene.ds_animation_state_active_index = bpy.props.IntProperty(default=0, min=0)
     bpy.types.NODE_MT_category_shader_output.append(add_gltf_settings_to_menu)
     action_filter_register()
 
@@ -718,6 +973,20 @@ def variant_register():
 
 
 def unregister():
+    del bpy.types.Scene.ds_animation_state_active_index
+    del bpy.types.Scene.ds_animation_states
+    del bpy.types.Scene.ds_environment_map
+    bpy.utils.unregister_class(SCENE_PT_ds_animation_states)
+    bpy.utils.unregister_class(SCENE_OT_ds_animation_reference_remove)
+    bpy.utils.unregister_class(SCENE_OT_ds_animation_reference_add)
+    bpy.utils.unregister_class(SCENE_OT_ds_animation_state_remove)
+    bpy.utils.unregister_class(SCENE_OT_ds_animation_state_add)
+    bpy.utils.unregister_class(SCENE_UL_ds_animation_references)
+    bpy.utils.unregister_class(SCENE_UL_ds_animation_states)
+    bpy.utils.unregister_class(DSAnimationStateProperties)
+    bpy.utils.unregister_class(DSAnimationReferenceProperties)
+    bpy.utils.unregister_class(WORLD_PT_ds_environment_map)
+    bpy.utils.unregister_class(DSEnvironmentMapProperties)
     bpy.utils.unregister_class(NODE_OT_GLTF_SETTINGS)
     action_filter_unregister()
 

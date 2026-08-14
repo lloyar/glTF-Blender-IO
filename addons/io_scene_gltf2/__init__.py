@@ -1292,6 +1292,23 @@ class ExportGLTF2_Base(ConvertGLTF2_Base):
         export_settings['gltf_lights'] = self.export_lights
         export_settings['gltf_lighting_mode'] = self.export_import_convert_lighting_mode
 
+        ds_environment_map = getattr(context.scene, 'ds_environment_map', None)
+        export_settings['ds_environment_exposure'] = (
+            ds_environment_map.exposure if ds_environment_map is not None else 9.7)
+        export_settings['ds_environment_tonemapping'] = (
+            ds_environment_map.tonemapping if ds_environment_map is not None else 'None')
+        export_settings['ds_environment_intensity'] = (
+            ds_environment_map.intensity if ds_environment_map is not None else 1100.0)
+
+        export_settings['ds_animation_states'] = []
+        for state in getattr(context.scene, 'ds_animation_states', []):
+            export_settings['ds_animation_states'].append({
+                'name': state.name,
+                'looping': state.looping,
+                'starts': [reference.animation for reference in state.starts],
+                'stops': [reference.animation for reference in state.stops],
+            })
+
         export_settings['gltf_gpu_instances'] = self.export_gpu_instances
 
         export_settings['gltf_try_sparse_sk'] = self.export_try_sparse_sk

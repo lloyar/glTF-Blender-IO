@@ -47,6 +47,9 @@ def save(context, export_settings):
         callback(export_settings)
 
     json, buffer = __export(export_settings)
+    __append_animation_states_extension(json, export_settings)
+    if sys.platform == 'win32':
+        buffer = __embed_environment_map(json, buffer, export_settings)
 
     post_export_callbacks = export_settings["post_export_callbacks"]
     for callback in post_export_callbacks:
@@ -419,52 +422,139 @@ def to_base64(s: str) -> str:
     return base64.b64encode(s.encode('utf-8')).decode('ascii')
 
 
-def __export_environment_map(export_settings):
+def __embed_environment_map(gltf_json, buffer, export_settings):
     world = bpy.context.scene.world
     if world is None or world.node_tree is None:
-        return
+        return buffer
 
     for node in world.node_tree.nodes:
         if node.type == 'TEX_ENVIRONMENT' and node.image is not None:
             image = node.image
-            filedir = export_settings['gltf_filedirectory']
-
-            if image.packed_file is not None:
-                data = image.packed_file.data
-            elif image.source in ('FILE', 'SEQUENCE') and image.filepath_raw:
-                src_path = bpy.path.abspath(image.filepath_raw)
-                if os.path.isfile(src_path):
-                    with open(src_path, 'rb') as f:
-                        data = f.read()
-                else:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                env_map_path = __write_environment_source(image, temp_dir)
+                if env_map_path is None:
                     continue
-            else:
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    tmp_path = os.path.join(tmpdir, 'env_temp.png')
-                    prev_format = image.file_format
-                    prev_path = image.filepath_raw
-                    image.file_format = 'PNG'
-                    image.filepath_raw = tmp_path
-                    image.save()
-                    image.file_format = prev_format
-                    image.filepath_raw = prev_path
-                    with open(tmp_path, 'rb') as f:
-                        data = f.read()
 
-            _, ext = os.path.splitext(image.name)
-            if ext.lower() not in ('.png', '.jpg', '.jpeg', '.hdr', '.exr', '.webp'):
-                ext = '.png'
+                diffuse_path, specular_path = __run_ibl_prefilter(env_map_path, temp_dir)
+                with open(diffuse_path, 'rb') as file:
+                    diffuse_data = __repair_legacy_rgb9e5_ktx2(file.read())
+                with open(specular_path, 'rb') as file:
+                    specular_data = __repair_legacy_rgb9e5_ktx2(file.read())
 
-            temp_dir = os.path.join(filedir, '.temp')
-            os.makedirs(temp_dir, exist_ok=True)
+            export_settings['log'].info(
+                "Embedding prefiltered environment maps with DS_environment_map")
+            return __append_environment_extension(
+                gltf_json,
+                buffer,
+                diffuse_data,
+                specular_data,
+                export_settings)
 
-            env_map_name = 'env' + ext
-            dst_path = os.path.join(temp_dir, env_map_name)
-            with open(dst_path, 'wb') as f:
-                f.write(data)
+    return buffer
 
-            __run_ibl_prefilter(dst_path, filedir)
-            break
+
+def __write_environment_source(image, temp_dir):
+    source_path = bpy.path.abspath(image.filepath_raw) if image.filepath_raw else ''
+    _, source_ext = os.path.splitext(source_path or image.name)
+    source_ext = source_ext.lower()
+    supported_extensions = ('.png', '.jpg', '.jpeg', '.hdr', '.exr', '.webp')
+
+    if image.packed_file is not None:
+        if source_ext not in supported_extensions:
+            source_ext = {
+                'PNG': '.png',
+                'JPEG': '.jpg',
+                'HDR': '.hdr',
+                'OPEN_EXR': '.exr',
+                'WEBP': '.webp',
+            }.get(image.file_format, '.png')
+        destination = os.path.join(temp_dir, 'environment' + source_ext)
+        with open(destination, 'wb') as file:
+            file.write(image.packed_file.data)
+        return destination
+
+    if image.source in ('FILE', 'SEQUENCE') and source_path:
+        if os.path.isfile(source_path):
+            return source_path
+        return None
+
+    destination = os.path.join(temp_dir, 'environment.png')
+    previous_format = image.file_format
+    previous_path = image.filepath_raw
+    try:
+        image.file_format = 'PNG'
+        image.filepath_raw = destination
+        image.save()
+    finally:
+        image.file_format = previous_format
+        image.filepath_raw = previous_path
+    return destination
+
+
+def __repair_legacy_rgb9e5_ktx2(data):
+    """Repair the malformed DFD emitted by the bundled environment map converter."""
+    ktx2_identifier = b'\xABKTX 20\xBB\r\n\x1A\n'
+    legacy_dfd = b'\0\0\0\0\0\0\0\0\x02\0\0\0'
+    rgb9e5_dfd = bytes.fromhex(
+        '7c000000000000000200780001000100'
+        '00000000040000000000000000000800'
+        '0000000000000000002100001b000420'
+        '000000000f0000001f00000009000801'
+        '0000000000000000002100001b000421'
+        '000000000f0000001f00000012000802'
+        '0000000000000000002100001b000422'
+        '000000000f0000001f000000')
+    result = bytearray(data)
+
+    def read_u32(offset):
+        return int.from_bytes(result[offset:offset + 4], 'little')
+
+    def read_u64(offset):
+        return int.from_bytes(result[offset:offset + 8], 'little')
+
+    def write_u32(offset, value):
+        result[offset:offset + 4] = value.to_bytes(4, 'little')
+
+    def write_u64(offset, value):
+        result[offset:offset + 8] = value.to_bytes(8, 'little')
+
+    if (len(result) < 80
+            or result[:12] != ktx2_identifier
+            or read_u32(12) != 123
+            or read_u32(36) != 6
+            or read_u32(52) != len(legacy_dfd)):
+        return data
+
+    dfd_offset = read_u32(48)
+    old_dfd_end = dfd_offset + len(legacy_dfd)
+    level_count = max(read_u32(40), 1)
+    level_index_end = 80 + level_count * 24
+    if (old_dfd_end > len(result)
+            or result[dfd_offset:old_dfd_end] != legacy_dfd
+            or level_index_end > dfd_offset
+            or read_u32(56) != 0
+            or read_u32(60) != 0
+            or read_u64(64) != 0
+            or read_u64(72) != 0):
+        return data
+
+    delta = len(rgb9e5_dfd) - len(legacy_dfd)
+    level_offsets = []
+    for level in range(level_count):
+        index_offset = 80 + level * 24
+        byte_offset = read_u64(index_offset)
+        byte_length = read_u64(index_offset + 8)
+        if byte_offset < old_dfd_end or byte_offset + byte_length > len(result):
+            return data
+        level_offsets.append((index_offset, byte_offset + delta))
+
+    result[dfd_offset:old_dfd_end] = rgb9e5_dfd
+    write_u32(16, 4)
+    write_u32(28, 0)
+    write_u32(52, len(rgb9e5_dfd))
+    for index_offset, byte_offset in level_offsets:
+        write_u64(index_offset, byte_offset)
+    return bytes(result)
 
 
 def __run_ibl_prefilter(env_map_path, output_dir):
@@ -473,17 +563,11 @@ def __run_ibl_prefilter(env_map_path, output_dir):
     cli_path = os.path.join(ibl_tools_dir, 'cli.exe')
     env_tools_path = os.path.join(ibl_tools_dir, 'environment_map_tools.exe')
 
-    temp_dir = os.path.dirname(env_map_path)
+    diffuse_path = os.path.join(output_dir, 'env_diffuse.ktx2')
+    specular_path = os.path.join(output_dir, 'env_specular.ktx2')
 
-    diffuse_path = os.path.join(temp_dir, 'env_diffuse.ktx2')
-    specular_path = os.path.join(temp_dir, 'env_specular.ktx2')
-
-    parent_dir = os.path.dirname(os.path.normpath(output_dir))
-    maps_dir = os.path.join(parent_dir, 'env_maps')
-    os.makedirs(maps_dir, exist_ok=True)
-
-    diffuse_rgb9e5_path = os.path.join(maps_dir, 'env_diffuse_rgb9e5_zstd.ktx2')
-    specular_rgb9e5_path = os.path.join(maps_dir, 'env_specular_rgb9e5_zstd.ktx2')
+    diffuse_rgb9e5_path = os.path.join(output_dir, 'env_diffuse_rgb9e5_zstd.ktx2')
+    specular_rgb9e5_path = os.path.join(output_dir, 'env_specular_rgb9e5_zstd.ktx2')
 
     subprocess.run([
         cli_path,
@@ -507,6 +591,106 @@ def __run_ibl_prefilter(env_map_path, output_dir):
         '--outputs', '{},{}'.format(diffuse_rgb9e5_path, specular_rgb9e5_path)
     ], check=True, cwd=ibl_tools_dir)
 
+    return diffuse_rgb9e5_path, specular_rgb9e5_path
+
+
+def __append_environment_extension(gltf_json, buffer, diffuse_data, specular_data, export_settings):
+    texture_indices = []
+    if export_settings['gltf_format'] == 'GLB':
+        for name, data in (
+                ('DS environment diffuse', diffuse_data),
+                ('DS environment specular', specular_data)):
+            padding = (4 - len(buffer) % 4) % 4
+            buffer += b'\0' * padding
+            byte_offset = len(buffer)
+            buffer += data
+
+            buffer_views = gltf_json.setdefault('bufferViews', [])
+            buffer_view_index = len(buffer_views)
+            buffer_views.append({
+                'buffer': 0,
+                'byteOffset': byte_offset,
+                'byteLength': len(data),
+                'name': name,
+            })
+            image_index = __append_environment_image(
+                gltf_json,
+                name,
+                buffer_view=buffer_view_index)
+            texture_indices.append(__append_environment_texture(gltf_json, name, image_index))
+
+        buffers = gltf_json.setdefault('buffers', [])
+        if len(buffers) == 0:
+            buffers.append({'byteLength': len(buffer)})
+        else:
+            buffers[0]['byteLength'] = len(buffer)
+    else:
+        for name, data in (
+                ('DS environment diffuse', diffuse_data),
+                ('DS environment specular', specular_data)):
+            uri = 'data:image/ktx2;base64,' + base64.b64encode(data).decode('ascii')
+            image_index = __append_environment_image(gltf_json, name, uri=uri)
+            texture_indices.append(__append_environment_texture(gltf_json, name, image_index))
+
+    extensions = gltf_json.setdefault('extensions', {})
+    extensions['DS_environment_map'] = {
+        'diffuse_map': {'index': texture_indices[0]},
+        'specular_map': {'index': texture_indices[1]},
+        'exposure': export_settings['ds_environment_exposure'],
+        'tonemapping': export_settings['ds_environment_tonemapping'],
+        'intensity': export_settings['ds_environment_intensity'],
+    }
+    extensions_used = gltf_json.setdefault('extensionsUsed', [])
+    if 'DS_environment_map' not in extensions_used:
+        extensions_used.append('DS_environment_map')
+    return buffer
+
+
+def __append_animation_states_extension(gltf_json, export_settings):
+    animation_states = {}
+    for state in export_settings.get('ds_animation_states', []):
+        name = state.get('name', '')
+        if not name:
+            export_settings['log'].warning(
+                "Skipping an unnamed state in Ds_animation_states_temp")
+            continue
+        animation_states[name] = {
+            'looping': bool(state.get('looping', False)),
+            'starts': [name for name in state.get('starts', []) if name],
+            'stops': [name for name in state.get('stops', []) if name],
+        }
+
+    extensions = gltf_json.setdefault('extensions', {})
+    extensions['Ds_animation_states_temp'] = {
+        'animation_states': animation_states,
+    }
+    extensions_used = gltf_json.setdefault('extensionsUsed', [])
+    if 'Ds_animation_states_temp' not in extensions_used:
+        extensions_used.append('Ds_animation_states_temp')
+
+
+def __append_environment_image(gltf_json, name, buffer_view=None, uri=None):
+    images = gltf_json.setdefault('images', [])
+    image = {
+        'mimeType': 'image/ktx2',
+        'name': name,
+    }
+    if buffer_view is not None:
+        image['bufferView'] = buffer_view
+    else:
+        image['uri'] = uri
+    images.append(image)
+    return len(images) - 1
+
+
+def __append_environment_texture(gltf_json, name, image_index):
+    textures = gltf_json.setdefault('textures', [])
+    textures.append({
+        'name': name,
+        'source': image_index,
+    })
+    return len(textures) - 1
+
 
 def __write_file(json, buffer, export_settings):
     try:
@@ -518,8 +702,6 @@ def __write_file(json, buffer, export_settings):
         if (export_settings['gltf_use_gltfpack']):
             __postprocess_with_gltfpack(export_settings)
         __write_car_info(json, export_settings)
-        if sys.platform == 'win32':
-            __export_environment_map(export_settings)
 
     except AssertionError as e:
         _, _, tb = sys.exc_info()
