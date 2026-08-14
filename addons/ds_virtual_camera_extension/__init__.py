@@ -427,7 +427,7 @@ class CAMERA_PT_DSVirtualCamera(bpy.types.Panel):
                 control_box.label(text="On Control Start Actions:", icon='PLAY')
                 self._draw_action_list(control_box, props, 'on_control_start_actions', 'on_control_start_actions_index', 'control_start_actions')
                 control_box.separator()
-                control_box.label(text="On Control End Actions:", icon='CHECKMARK')
+                control_box.label(text="On Control Complete Actions:", icon='CHECKMARK')
                 self._draw_action_list(control_box, props, 'on_control_complete_actions', 'on_control_complete_actions_index', 'control_complete_actions')
 
         # Idle Event
