@@ -444,12 +444,12 @@ def __export_environment_map(gltf_json, buffer, export_settings):
 
             export_settings['log'].info(
                 "Exporting prefiltered environment maps with DS_environment_map")
-            __append_environment_extension(
+            return __append_environment_extension(
                 gltf_json,
+                buffer,
                 diffuse_data,
                 specular_data,
                 export_settings)
-            return buffer
 
     return buffer
 
@@ -595,26 +595,62 @@ def __run_ibl_prefilter(env_map_path, output_dir):
     return diffuse_rgb9e5_path, specular_rgb9e5_path
 
 
-def __append_environment_extension(gltf_json, diffuse_data, specular_data, export_settings):
+def __append_environment_extension(gltf_json, buffer, diffuse_data, specular_data, export_settings):
     texture_indices = []
-    texture_directory = export_settings['gltf_texturedirectory']
-    os.makedirs(texture_directory, exist_ok=True)
-    for name, filename, data in (
-            ('DS environment diffuse', 'env_diffuse_rgb9e5_zstd.ktx2', diffuse_data),
-            ('DS environment specular', 'env_specular_rgb9e5_zstd.ktx2', specular_data)):
-        destination = os.path.join(texture_directory, filename)
-        with open(destination, 'wb') as file:
-            file.write(data)
-        relative_path = os.path.relpath(
-            destination,
-            start=export_settings['gltf_filedirectory'],
-        )
-        image_index = __append_environment_image(
-            gltf_json,
-            name,
-            path_to_uri(relative_path),
-        )
-        texture_indices.append(__append_environment_texture(gltf_json, name, image_index))
+    environment_maps = (
+        ('DS environment diffuse', 'env_diffuse_rgb9e5_zstd.ktx2', diffuse_data),
+        ('DS environment specular', 'env_specular_rgb9e5_zstd.ktx2', specular_data),
+    )
+
+    if export_settings['gltf_format'] == 'GLB':
+        for name, _, data in environment_maps:
+            padding = (4 - len(buffer) % 4) % 4
+            buffer += b'\0' * padding
+            byte_offset = len(buffer)
+            buffer += data
+
+            buffer_views = gltf_json.setdefault('bufferViews', [])
+            buffer_view_index = len(buffer_views)
+            buffer_views.append({
+                'buffer': 0,
+                'byteOffset': byte_offset,
+                'byteLength': len(data),
+                'name': name,
+            })
+            image_index = __append_environment_image(
+                gltf_json,
+                name,
+                buffer_view=buffer_view_index,
+            )
+            texture_indices.append(__append_environment_texture(gltf_json, name, image_index))
+
+        buffers = gltf_json.setdefault('buffers', [])
+        if len(buffers) == 0:
+            buffers.append({'byteLength': len(buffer)})
+        else:
+            buffers[0]['byteLength'] = len(buffer)
+    elif export_settings['gltf_format'] == 'GLTF_EMBEDDED':
+        for name, _, data in environment_maps:
+            uri = 'data:image/ktx2;base64,' + base64.b64encode(data).decode('ascii')
+            image_index = __append_environment_image(gltf_json, name, uri=uri)
+            texture_indices.append(__append_environment_texture(gltf_json, name, image_index))
+    else:
+        texture_directory = export_settings['gltf_texturedirectory']
+        os.makedirs(texture_directory, exist_ok=True)
+        for name, filename, data in environment_maps:
+            destination = os.path.join(texture_directory, filename)
+            with open(destination, 'wb') as file:
+                file.write(data)
+            relative_path = os.path.relpath(
+                destination,
+                start=export_settings['gltf_filedirectory'],
+            )
+            image_index = __append_environment_image(
+                gltf_json,
+                name,
+                uri=path_to_uri(relative_path),
+            )
+            texture_indices.append(__append_environment_texture(gltf_json, name, image_index))
 
     extensions = gltf_json.setdefault('extensions', {})
     extensions['DS_environment_map'] = {
@@ -627,6 +663,7 @@ def __append_environment_extension(gltf_json, diffuse_data, specular_data, expor
     extensions_used = gltf_json.setdefault('extensionsUsed', [])
     if 'DS_environment_map' not in extensions_used:
         extensions_used.append('DS_environment_map')
+    return buffer
 
 
 def __append_animation_states_extension(gltf_json, export_settings):
@@ -652,13 +689,17 @@ def __append_animation_states_extension(gltf_json, export_settings):
         extensions_used.append('Ds_animation_states_temp')
 
 
-def __append_environment_image(gltf_json, name, uri):
+def __append_environment_image(gltf_json, name, buffer_view=None, uri=None):
     images = gltf_json.setdefault('images', [])
-    images.append({
+    image = {
         'mimeType': 'image/ktx2',
         'name': name,
-        'uri': uri,
-    })
+    }
+    if buffer_view is not None:
+        image['bufferView'] = buffer_view
+    else:
+        image['uri'] = uri
+    images.append(image)
     return len(images) - 1
 
 
