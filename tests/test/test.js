@@ -270,7 +270,7 @@ describe('Exporter', function () {
                                 done();
                             }
                         }, args);
-                        //validateGltf(dstPath, done); // uncomment this and comment blenderFileToGltf to not re-export all files
+                        // validateGltf(dstPath, done); // uncomment this and comment blenderFileToGltf to not re-export all files
                     });
                 });
             });
@@ -279,6 +279,20 @@ describe('Exporter', function () {
         describe(blenderVersion + '_export_results', function () {
             let outDirName = 'out' + blenderVersion;
             let outDirPath = path.resolve(OUT_PREFIX, 'scenes', outDirName);
+
+            it('can export a linked (to other file) collection', function () {
+                let gltfPath = path.resolve(outDirPath, '01_linked_collection.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                assert.strictEqual(asset.nodes.length, 4);
+            });
+
+            it('can export all collection instances', function () {
+                let gltfPath = path.resolve(outDirPath, '01_multiple_collection_instances.gltf');
+                const asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                assert.strictEqual(asset.nodes.length, 9);
+            });
 
             it('can export a base color', function () {
                 let gltfPath = path.resolve(outDirPath, '01_principled_material.gltf');
@@ -3235,6 +3249,35 @@ describe('Exporter', function () {
                 assert.ok(!("COLOR_1" in primitive.attributes));
             });
 
+            if('exports partial VC', function () {
+                let gltfPath = path.resolve(outDirPath, '24_material_partial_VC.gltf');
+                var asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                // check that primitive that don't need VC have a VC with only 1.0 color
+                // (and the other one is exported with VC 0.0, as defined in Blender)
+
+                // retrieve the material where baseColorTexture is defined
+                const matWithTexture = asset.materials.filter(m => m.pbrMetallicRoughness.baseColorTexture !== undefined)[0];
+
+                // retrieve the primitive using this material
+                const primitiveWithTexture = asset.meshes[asset.nodes[0].mesh].primitives.filter(p => p.material === asset.materials.indexOf(matWithTexture))[0];
+
+                // check that it has a COLOR_0 with 1.0
+                assert.ok("COLOR_0" in primitiveWithTexture.attributes);
+                let colors = getAccessorData(gltfPath, asset, primitiveWithTexture.attributes.COLOR_0, bufferCache);
+                assert.equalEpsilon(colors[0], [1.0, 1.0, 1.0, 1.0]);
+
+                const other_primitive_index = primitiveWithTexture === asset.meshes[asset.nodes[0].mesh].primitives[0] ? 1 : 0;
+
+                // check that the other primitive has a COLOR_0 with 0.0
+                const primitiveWithoutTexture = asset.meshes[asset.nodes[0].mesh].primitives[other_primitive_index];
+                assert.ok("COLOR_0" in primitiveWithoutTexture.attributes);
+                colors = getAccessorData(gltfPath, asset, primitiveWithoutTexture.attributes.COLOR_0, bufferCache);
+                assert.equalEpsilon(colors[0], [0.0, 0.0, 0.0, 1.0]);
+
+
+            });
+
             it('exports broadcast actions', function () {
 
                 let gltfPath = path.resolve(outDirPath, '35_broadcast_slots.gltf');
@@ -3401,6 +3444,176 @@ describe('Exporter', function () {
 
             });
 
+            it('export object point cloud', function () {
+                let gltfPath = path.resolve(outDirPath, '38_pointcloud_object.gltf');
+                var asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                let bufferCache = {};
+
+                assert.strictEqual(asset.meshes.length, 1);
+                const mesh = asset.meshes[0];
+                assert.strictEqual(mesh.primitives.length, 1);
+                const primitive = mesh.primitives[0];
+                assert.strictEqual(primitive.mode, 0); // POINTS
+
+                const positions = getAccessorData(gltfPath, asset, primitive.attributes.POSITION, bufferCache);
+                assert.strictEqual(positions.length, 1200); // 400 points * 3 components
+
+                const colors = getAccessorData(gltfPath, asset, primitive.attributes._color, bufferCache);
+                assert.strictEqual(colors.length, 1600); // RGBA : 400 points * 4 components
+                assert.equalEpsilon(colors[0], 0.1);
+                assert.equalEpsilon(colors[1], 0.2);
+                assert.equalEpsilon(colors[2], 0.3);
+                assert.equalEpsilon(colors[3], 1.0);
+
+                const tests = getAccessorData(gltfPath, asset, primitive.attributes._test, bufferCache);
+                assert.strictEqual(tests.length, 400); // 400 points * 1 components
+                assert.equalEpsilon(tests[0], 0.4);
+
+            });
+
+            it('export GN Point Cloud', function () {
+                let gltfPath = path.resolve(outDirPath, '38_pointcloud_GN.gltf');
+                var asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                let bufferCache = {};
+
+                assert.strictEqual(asset.meshes.length, 1);
+                const mesh = asset.meshes[0];
+                assert.strictEqual(mesh.primitives.length, 1);
+                const primitive = mesh.primitives[0];
+                assert.strictEqual(primitive.mode, 0); // POINTS
+
+                const positions = getAccessorData(gltfPath, asset, primitive.attributes.POSITION, bufferCache);
+                assert.strictEqual(positions.length, 720); // 240 points * 3 components
+
+                const tests = getAccessorData(gltfPath, asset, primitive.attributes._TEST, bufferCache);
+                assert.strictEqual(tests.length, 240); // 240 points * 1 components
+                assert.equalEpsilon(tests[0], 0.35);
+
+            });
+
+            it("export light on Cycles", function () {
+                let gltfPath = path.resolve(outDirPath, '37_lamp_Cycles.gltf');
+                var asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                const light = asset.extensions['KHR_lights_punctual'].lights[0];
+                assert.strictEqual(light.type, 'point');
+                assert.equalEpsilonArray(light.color, [0.5, 0.0, 0.0]);
+                // TODO add intensity
+            });
+
+            it("export light on Eevee", function () {
+                let gltfPath = path.resolve(outDirPath, '37_lamp_EEVEE.gltf');
+                var asset = JSON.parse(fs.readFileSync(gltfPath));
+                const light = asset.extensions['KHR_lights_punctual'].lights[0];
+                assert.strictEqual(light.type, 'point');
+                assert.equalEpsilonArray(light.color, [0.0, 0.0, 1.0]);
+                // TODO add intensity
+            });
+
+            it("export light on Workbench", function () {
+                let gltfPath = path.resolve(outDirPath, '37_lamp_Workbench.gltf');
+                var asset = JSON.parse(fs.readFileSync(gltfPath));
+                const light = asset.extensions['KHR_lights_punctual'].lights[0];
+                assert.strictEqual(light.type, 'point');
+                assert.equalEpsilonArray(light.color, [0.75, 0.0, 0.0]);
+                // TODO add intensity
+
+            });
+
+            it('exports dispersion', function () {
+                let gltfPath = path.resolve(outDirPath, '01_dispersion.gltf');
+                var asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                // no dispersion
+                const mat_no_dispersion = asset.materials[asset.meshes[asset.nodes.filter(a => a.name == "Cube_no_disp")[0].mesh].primitives[0].material];
+                //assert.strictEqual(mat_no_dispersion.extensions['KHR_materials_dispersion'], undefined);
+                // todo: when detected material by material, this will be undefined
+                // See https://github.com/KhronosGroup/glTF-Blender-IO/pull/2667/changes/735b010b9d159aefa6d70012d9cab852a040ba2b
+                assert.deepStrictEqual(mat_no_dispersion.extensions['KHR_materials_dispersion'], {});
+
+                // dispersion 0.2
+                const mat_disp_0_2 = asset.materials[asset.meshes[asset.nodes.filter(a => a.name == "Cube_disp_0.2")[0].mesh].primitives[0].material];
+                assert.equalEpsilon(mat_disp_0_2.extensions['KHR_materials_dispersion'].dispersion, 0.2);
+
+                // no dispersion because no transmission
+                const mat_no_transmission = asset.materials[asset.meshes[asset.nodes.filter(a => a.name == "no_transmission")[0].mesh].primitives[0].material];
+                // no extension at all
+                assert.strictEqual(mat_no_transmission.extensions, undefined);
+                // check we don't have any animation pointer on this material
+                const mat_no_transmission_index = asset.materials.indexOf(mat_no_transmission);
+                const animation_no_transmission = asset.animations.filter(animation => animation.channels.filter(channel => channel.target.extensions['KHR_animation_pointer']['pointer'] === "/materials/" + mat_no_transmission_index + "/extensions/KHR_materials_dispersion/dispersion").length > 0);
+                assert.strictEqual(animation_no_transmission.length, 0);
+
+                // dispersion 1.0 (and animation pointer on this material)
+                const mat_disp_1_0 = asset.materials[asset.meshes[asset.nodes.filter(a => a.name == "Cube_disp_1_to_0")[0].mesh].primitives[0].material];
+                assert.equalEpsilon(mat_disp_1_0.extensions['KHR_materials_dispersion'].dispersion, 1.0);
+                // get index of the material
+                const mat_disp_1_0_index = asset.materials.indexOf(mat_disp_1_0);
+                // check that there is an animation channel targeting this material
+                const animation = asset.animations.filter(animation => animation.channels.filter(channel => channel.target.extensions['KHR_animation_pointer']['pointer'] == "/materials/" + mat_disp_1_0_index + "/extensions/KHR_materials_dispersion/dispersion").length > 0);
+                assert.strictEqual(animation.length > 0, true);
+
+                // dispersion 0.0 (so empty { }, and animation pointer on this material)
+                const mat_disp_0_0 = asset.materials[asset.meshes[asset.nodes.filter(a => a.name == "Cube_disp_0_to_1")[0].mesh].primitives[0].material];
+                // check we have an empty { }
+                assert.deepStrictEqual(mat_disp_0_0.extensions['KHR_materials_dispersion'], {});
+                const mat_disp_0_0_index = asset.materials.indexOf(mat_disp_0_0);
+                const animation_0_0 = asset.animations.filter(animation => animation.channels.filter(channel => channel.target.extensions['KHR_animation_pointer']['pointer'] == "/materials/" + mat_disp_0_0_index + "/extensions/KHR_materials_dispersion/dispersion").length > 0);
+                assert.strictEqual(animation_0_0.length > 0, true);
+
+            });
+
+            it('export iridecence', function () {
+                let gltfPath = path.resolve(outDirPath, '39_iridescence.gltf');
+                var asset = JSON.parse(fs.readFileSync(gltfPath));
+
+                // retrieve material of the object "no_iridescence"
+                const noIridescenceMat = asset.materials[asset.meshes[asset.nodes.filter(a => a.name == "no_iridescence")[0].mesh].primitives[0].material];
+                assert.strictEqual(noIridescenceMat.extensions?.KHR_materials_iridescence, undefined);
+
+                // no animation pointer on this material
+                const mat_no_iridescence_index = asset.materials.indexOf(noIridescenceMat);
+                // Use these 2 lines if one day, there are some animation in this file
+                //const animation_no_iridescnce = asset.animations.filter(animation => animation.channels.filter(channel => channel.target.extensions['KHR_animation_pointer']['pointer'] == "/materials/" + mat_no_iridescence_index + "/extensions/KHR_materials_iridescence/iridescenceFactor").length > 0);
+                //assert.strictEqual(animation_no_iridescnce.length , 0);
+                assert.strictEqual(asset.animations === undefined, true);
+
+                // retrieve material of the object "iridescence"
+                const iridescenceMat = asset.materials[asset.meshes[asset.nodes.filter(a => a.name == "iridescence")[0].mesh].primitives[0].material];
+                assert.equalEpsilon(iridescenceMat.extensions?.KHR_materials_iridescence.iridescenceFactor, 0.6);
+                assert.equalEpsilon(iridescenceMat.extensions?.KHR_materials_iridescence.iridescenceIor, 1.4);
+                assert.equalEpsilon(iridescenceMat.extensions?.KHR_materials_iridescence.iridescenceThicknessMinimum, 90.0);
+                assert.equalEpsilon(iridescenceMat.extensions?.KHR_materials_iridescence.iridescenceThicknessMaximum, 430.0);
+                // Verify we have textures
+                assert.strictEqual(iridescenceMat.extensions?.KHR_materials_iridescence.iridescenceTexture !== undefined, true);
+                assert.strictEqual(iridescenceMat.extensions?.KHR_materials_iridescence.iridescenceThicknessTexture !== undefined, true);
+
+                // retrieve material of the object "no_texture"
+                const noTextureMat = asset.materials[asset.meshes[asset.nodes.filter(a => a.name == "no_texture")[0].mesh].primitives[0].material];
+                assert.equalEpsilon(noTextureMat.extensions?.KHR_materials_iridescence.iridescenceFactor, 0.5);
+                assert.equalEpsilon(noTextureMat.extensions?.KHR_materials_iridescence.iridescenceIor, 1.33);
+                // if no texture => no need of minimum tickness
+                assert.strictEqual(noTextureMat.extensions?.KHR_materials_iridescence.iridescenceThicknessMinimum, undefined);
+                assert.equalEpsilon(noTextureMat.extensions?.KHR_materials_iridescence.iridescenceThicknessMaximum, 450.0);
+                // Verify we don't have textures
+                assert.strictEqual(noTextureMat.extensions?.KHR_materials_iridescence.iridescenceTexture, undefined);
+                assert.strictEqual(noTextureMat.extensions?.KHR_materials_iridescence.iridescenceThicknessTexture, undefined);
+
+                // retrieve material of the object "all_default"
+                const allDefaultMat = asset.materials[asset.meshes[asset.nodes.filter(a => a.name == "all_default")[0].mesh].primitives[0].material];
+                assert.equalEpsilon(allDefaultMat.extensions?.KHR_materials_iridescence.iridescenceFactor, 1.0);
+                // because Ior is default, not exported
+                assert.strictEqual(allDefaultMat.extensions?.KHR_materials_iridescence.iridescenceIor, undefined);
+                assert.strictEqual(allDefaultMat.extensions?.KHR_materials_iridescence.iridescenceThicknessMinimum, undefined);
+                assert.strictEqual(allDefaultMat.extensions?.KHR_materials_iridescence.iridescenceThicknessMaximum, undefined);
+                // Verify we have textures
+                assert.strictEqual(allDefaultMat.extensions?.KHR_materials_iridescence.iridescenceTexture !== undefined, true);
+                assert.strictEqual(allDefaultMat.extensions?.KHR_materials_iridescence.iridescenceThicknessTexture !== undefined, true);
+
+            });
+
         });
     });
 
@@ -3431,7 +3644,7 @@ describe('Exporter', function () {
                             if (fs.existsSync(gltfOptionsPath)) {
                                 options += ' ' + fs.readFileSync(gltfOptionsPath).toString().replace(/\r?\n|\r/g, '');
                             }
-                            //return done(); // uncomment to not roundtrip all files
+                            // return done(); // uncomment to not roundtrip all files
                             blenderRoundtripGltf(blenderVersion, gltfSrcPath, outDirPath, (error) => {
                                 if (error) {
                                     if (options.indexOf("--no-validate") !== -1) { return done(); }

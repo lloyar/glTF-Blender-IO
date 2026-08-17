@@ -37,32 +37,26 @@ def filter_animation(export_settings):
 
                 if track_data.on_type == "OBJECT":
                     if data_path == "hide_render":
-                        export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][data_path][
-                            'used'] = True
+                        node_paths = export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths']
+                        mark_path_used(node_paths, data_path)
                         if 'nla_track_idx' not in \
-                                export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][
-                                    data_path]:
-                            export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][data_path][
-                                'nla_track_idx'] = []
+                                node_paths[data_path]:
+                            node_paths[data_path]['nla_track_idx'] = []
 
-                        export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths'][data_path][
-                            'nla_track_idx'].append(nla_track.idx)
+                        node_paths[data_path]['nla_track_idx'].append(nla_track.idx)
 
                 elif track_data.on_type == "NODETREE":
                     node_name = data_path.split('nodes["')[1].split('"]')[0]
                     node = blender_material.node_tree.nodes[node_name]
+                    material_paths = export_settings['KHR_animation_pointer']['materials'][id(blender_material)][
+                        'paths']
                     if node.type == 'MAPPING':
-                        export_settings['KHR_animation_pointer']['materials'][id(blender_material)]['paths'][
-                            f'node_tree.nodes["{node_name}"].inputs[1].default_value']['used'] = True
-                        export_settings['KHR_animation_pointer']['materials'][id(blender_material)]['paths'][
-                            f'node_tree.nodes["{node_name}"].inputs[3].default_value']['used'] = True
-                        export_settings['KHR_animation_pointer']['materials'][id(blender_material)]['paths'][
-                            f'node_tree.nodes["{node_name}"].inputs[2].default_value[2]']['used'] = True
+                        mark_path_used(material_paths, f'node_tree.nodes["{node_name}"].inputs[1].default_value')
+                        mark_path_used(material_paths, f'node_tree.nodes["{node_name}"].inputs[3].default_value')
+                        mark_path_used(material_paths, f'node_tree.nodes["{node_name}"].inputs[2].default_value[2]')
                     elif data_path.startswith("nodes[\"Principled BSDF\"].inputs"):
                         # TODO(lloyar): process
-                        export_settings['KHR_animation_pointer']['materials'][id(blender_material)]['paths'][
-                            f'node_tree.{data_path}']['used'] = True
-                        pass
+                        mark_path_used(material_paths, f'node_tree.{data_path}')
                     else:
                         pass
                 else:
@@ -86,6 +80,22 @@ def filter_animation(export_settings):
     #         for path in list(export_settings['KHR_animation_pointer']['materials'][material_id]['paths'].keys()):
     #             if 'used' not in export_settings['KHR_animation_pointer']['materials'][material_id]['paths'][path]:
     #                 del export_settings['KHR_animation_pointer']['materials'][material_id]['paths'][path]
+
+
+def mark_path_used(paths, data_path):
+    path = paths.get(data_path)
+    if path is None or path.get('used') is True:
+        return
+
+    path['used'] = True
+
+    # Some glTF animation channels are calculated from multiple Blender
+    # properties. Keep those source properties available to the sampling cache,
+    # even when only one of them has an F-Curve in the current NLA track.
+    for dependency_name in ('strength_channel', 'factor_channel'):
+        dependency_path = path.get(dependency_name)
+        if dependency_path is not None:
+            mark_path_used(paths, dependency_path)
 
 
 def delete_unused_pointer(export_settings, type_str):
