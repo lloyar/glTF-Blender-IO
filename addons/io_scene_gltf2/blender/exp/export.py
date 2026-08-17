@@ -28,6 +28,7 @@ from ...io.exp.user_extensions import export_user_extensions
 from ...io.com.path import path_to_uri
 from ..com import json_util
 from . import gather as gltf2_blender_gather
+from . import ibl
 from .exporter import GlTF2Exporter
 
 
@@ -49,7 +50,7 @@ def save(context, export_settings):
 
     json, buffer = __export(export_settings)
     __append_animation_states_extension(json, export_settings)
-    if sys.platform == 'win32':
+    if sys.platform == 'darwin':
         buffer = __export_environment_map(json, buffer, export_settings)
 
     post_export_callbacks = export_settings["post_export_callbacks"]
@@ -622,11 +623,11 @@ def __export_environment_map(gltf_json, buffer, export_settings):
                 if env_map_path is None:
                     continue
 
-                diffuse_path, specular_path = __run_ibl_prefilter(env_map_path, temp_dir)
+                diffuse_path, specular_path = ibl.generate_ibl_maps(env_map_path, temp_dir)
                 with open(diffuse_path, 'rb') as file:
-                    diffuse_data = __repair_legacy_rgb9e5_ktx2(file.read())
+                    diffuse_data = file.read()
                 with open(specular_path, 'rb') as file:
-                    specular_data = __repair_legacy_rgb9e5_ktx2(file.read())
+                    specular_data = file.read()
 
             export_settings['log'].info(
                 "Exporting prefiltered environment maps with DS_environment_map")
@@ -676,109 +677,6 @@ def __write_environment_source(image, temp_dir):
         image.file_format = previous_format
         image.filepath_raw = previous_path
     return destination
-
-
-def __repair_legacy_rgb9e5_ktx2(data):
-    """Repair the malformed DFD emitted by the bundled environment map converter."""
-    ktx2_identifier = b'\xABKTX 20\xBB\r\n\x1A\n'
-    legacy_dfd = b'\0\0\0\0\0\0\0\0\x02\0\0\0'
-    rgb9e5_dfd = bytes.fromhex(
-        '7c000000000000000200780001000100'
-        '00000000040000000000000000000800'
-        '0000000000000000002100001b000420'
-        '000000000f0000001f00000009000801'
-        '0000000000000000002100001b000421'
-        '000000000f0000001f00000012000802'
-        '0000000000000000002100001b000422'
-        '000000000f0000001f000000')
-    result = bytearray(data)
-
-    def read_u32(offset):
-        return int.from_bytes(result[offset:offset + 4], 'little')
-
-    def read_u64(offset):
-        return int.from_bytes(result[offset:offset + 8], 'little')
-
-    def write_u32(offset, value):
-        result[offset:offset + 4] = value.to_bytes(4, 'little')
-
-    def write_u64(offset, value):
-        result[offset:offset + 8] = value.to_bytes(8, 'little')
-
-    if (len(result) < 80
-            or result[:12] != ktx2_identifier
-            or read_u32(12) != 123
-            or read_u32(36) != 6
-            or read_u32(52) != len(legacy_dfd)):
-        return data
-
-    dfd_offset = read_u32(48)
-    old_dfd_end = dfd_offset + len(legacy_dfd)
-    level_count = max(read_u32(40), 1)
-    level_index_end = 80 + level_count * 24
-    if (old_dfd_end > len(result)
-            or result[dfd_offset:old_dfd_end] != legacy_dfd
-            or level_index_end > dfd_offset
-            or read_u32(56) != 0
-            or read_u32(60) != 0
-            or read_u64(64) != 0
-            or read_u64(72) != 0):
-        return data
-
-    delta = len(rgb9e5_dfd) - len(legacy_dfd)
-    level_offsets = []
-    for level in range(level_count):
-        index_offset = 80 + level * 24
-        byte_offset = read_u64(index_offset)
-        byte_length = read_u64(index_offset + 8)
-        if byte_offset < old_dfd_end or byte_offset + byte_length > len(result):
-            return data
-        level_offsets.append((index_offset, byte_offset + delta))
-
-    result[dfd_offset:old_dfd_end] = rgb9e5_dfd
-    write_u32(16, 4)
-    write_u32(28, 0)
-    write_u32(52, len(rgb9e5_dfd))
-    for index_offset, byte_offset in level_offsets:
-        write_u64(index_offset, byte_offset)
-    return bytes(result)
-
-
-def __run_ibl_prefilter(env_map_path, output_dir):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    ibl_tools_dir = os.path.normpath(os.path.join(script_dir, '..', '..', 'ibl_tools'))
-    cli_path = os.path.join(ibl_tools_dir, 'cli.exe')
-    env_tools_path = os.path.join(ibl_tools_dir, 'environment_map_tools.exe')
-
-    diffuse_path = os.path.join(output_dir, 'env_diffuse.ktx2')
-    specular_path = os.path.join(output_dir, 'env_specular.ktx2')
-
-    diffuse_rgb9e5_path = os.path.join(output_dir, 'env_diffuse_rgb9e5_zstd.ktx2')
-    specular_rgb9e5_path = os.path.join(output_dir, 'env_specular_rgb9e5_zstd.ktx2')
-
-    subprocess.run([
-        cli_path,
-        '-inputPath', env_map_path,
-        '-outCubeMap', diffuse_path,
-        '-distribution', 'Lambertian',
-        '-cubeMapResolution', '32'
-    ], check=True, cwd=ibl_tools_dir)
-
-    subprocess.run([
-        cli_path,
-        '-inputPath', env_map_path,
-        '-outCubeMap', specular_path,
-        '-distribution', 'GGX',
-        '-cubeMapResolution', '512'
-    ], check=True, cwd=ibl_tools_dir)
-
-    subprocess.run([
-        env_tools_path,
-        '--inputs', '{},{}'.format(diffuse_path, specular_path),
-        '--outputs', '{},{}'.format(diffuse_rgb9e5_path, specular_rgb9e5_path)
-    ], check=True, cwd=ibl_tools_dir)
-
-    return diffuse_rgb9e5_path, specular_rgb9e5_path
 
 
 def __append_environment_extension(gltf_json, buffer, diffuse_data, specular_data, export_settings):
