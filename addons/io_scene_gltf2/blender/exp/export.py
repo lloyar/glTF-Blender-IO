@@ -50,7 +50,7 @@ def save(context, export_settings):
 
     json, buffer = __export(export_settings)
     __append_animation_states_extension(json, export_settings)
-    if sys.platform == 'darwin':
+    if ibl.is_supported_platform():
         buffer = __export_environment_map(json, buffer, export_settings)
 
     post_export_callbacks = export_settings["post_export_callbacks"]
