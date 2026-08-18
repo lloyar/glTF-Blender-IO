@@ -142,10 +142,12 @@ class DSAnimationStateProperties(bpy.types.PropertyGroup):
         default="Animation State",
         update=on_ds_animation_state_name_update,
     )
-    looping: bpy.props.BoolProperty(
-        name="Looping",
-        description="Repeat the main animation forever",
-        default=False,
+    looping: bpy.props.IntProperty(
+        name="Loop Count",
+        description="Number of plays; values less than or equal to zero repeat forever",
+        default=1,
+        soft_min=0,
+        soft_max=10,
     )
     starts: bpy.props.CollectionProperty(type=DSAnimationReferenceProperties)
     stops: bpy.props.CollectionProperty(type=DSAnimationReferenceProperties)

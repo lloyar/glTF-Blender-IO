@@ -759,7 +759,7 @@ def __append_animation_states_extension(gltf_json, export_settings):
                 "Skipping an unnamed state in Ds_animation_states_temp")
             continue
         animation_states[name] = {
-            'looping': bool(state.get('looping', False)),
+            'looping': int(state.get('looping', 1)),
             'starts': [name for name in state.get('starts', []) if name],
             'stops': [name for name in state.get('stops', []) if name],
         }
