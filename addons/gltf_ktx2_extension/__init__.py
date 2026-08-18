@@ -47,7 +47,7 @@ def _reload_submodules():
 bl_info = {
     "name": "glTF KTX2 Texture Extension",
     "category": "Import-Export",
-    "version": (1, 0, 5),
+    "version": (1, 0, 6),
     "blender": (4, 0, 0),
     "location": "File > Export/Import > glTF 2.0",
     "description": "Add KTX2 texture support via KHR_texture_basisu extension",
@@ -180,7 +180,7 @@ class KTX2ExportFormatBASISU(bpy.types.PropertyGroup):
 class KTX2ExportFormatASTC(bpy.types.PropertyGroup):
     astc_block_size: bpy.props.EnumProperty(
         name="ASTC Block Size",
-        description="ASTC compression block size. Smaller blocks = higher quality, larger files",
+        description="ASTC block size. Texture dimensions are automatically aligned to the selected block size",
         items=[
             ('4x4', "4x4 (Highest Quality)", "8 bits/pixel - Best quality, largest files"),
             ('5x5', "5x5 (High Quality)", "5.12 bits/pixel - High quality"),

@@ -25,6 +25,7 @@ import platform
 import subprocess
 import tempfile
 import shutil
+import struct
 from pathlib import Path
 
 # KTX-Software version to download
@@ -599,6 +600,87 @@ def get_tool_environment():
     return env
 
 
+def get_image_dimensions(image_path):
+    """Read the dimensions of a PNG or JPEG without external dependencies."""
+    try:
+        with open(image_path, 'rb') as image_file:
+            header = image_file.read(24)
+
+            if header.startswith(b'\x89PNG\r\n\x1a\n') and header[12:16] == b'IHDR':
+                return struct.unpack('>II', header[16:24])
+
+            if header[:2] != b'\xff\xd8':
+                return None
+
+            image_file.seek(2)
+            start_of_frame_markers = {
+                0xC0, 0xC1, 0xC2, 0xC3,
+                0xC5, 0xC6, 0xC7,
+                0xC9, 0xCA, 0xCB,
+                0xCD, 0xCE, 0xCF,
+            }
+
+            while True:
+                marker_prefix = image_file.read(1)
+                while marker_prefix and marker_prefix != b'\xff':
+                    marker_prefix = image_file.read(1)
+                if not marker_prefix:
+                    return None
+
+                marker_data = image_file.read(1)
+                while marker_data == b'\xff':
+                    marker_data = image_file.read(1)
+                if not marker_data:
+                    return None
+
+                marker = marker_data[0]
+                if marker == 0x00:
+                    continue
+                if marker in {0x01, 0xD8, 0xD9} or 0xD0 <= marker <= 0xD7:
+                    continue
+
+                segment_length_data = image_file.read(2)
+                if len(segment_length_data) != 2:
+                    return None
+                segment_length = struct.unpack('>H', segment_length_data)[0]
+                if segment_length < 2:
+                    return None
+
+                if marker in start_of_frame_markers:
+                    frame_header = image_file.read(5)
+                    if len(frame_header) != 5:
+                        return None
+                    height, width = struct.unpack('>HH', frame_header[1:5])
+                    return width, height
+
+                image_file.seek(segment_length - 2, os.SEEK_CUR)
+    except (OSError, struct.error):
+        return None
+
+
+def get_astc_aligned_dimensions(image_path, block_size, scale=1.0):
+    """Calculate ASTC-compatible dimensions after applying the requested scale."""
+    try:
+        block_width, block_height = (int(value) for value in block_size.lower().split('x', 1))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+    if block_width <= 0 or block_height <= 0 or scale <= 0:
+        return None
+
+    source_dimensions = get_image_dimensions(image_path)
+    if source_dimensions is None:
+        return None
+
+    source_width, source_height = source_dimensions
+    scaled_width = max(1, int(source_width * scale))
+    scaled_height = max(1, int(source_height * scale))
+    aligned_width = ((scaled_width + block_width - 1) // block_width) * block_width
+    aligned_height = ((scaled_height + block_height - 1) // block_height) * block_height
+
+    return source_dimensions, (scaled_width, scaled_height), (aligned_width, aligned_height)
+
+
 def run_toktx(input_path, output_path, options=None):
     """
     Run the toktx tool to convert an image to KTX2.
@@ -615,6 +697,7 @@ def run_toktx(input_path, output_path, options=None):
             - astc_block_size: '4x4', '5x5', '6x6', '8x8' (for ASTC)
             - oetf: Transfer function (linear|srgb)
             - target_type: Target type (R, RG, RGB, RGBA)
+            - resize: Optional explicit (width, height) passed to ktx create
 
     Returns:
         tuple: (success: bool, error_message: str or None)
@@ -679,9 +762,15 @@ def run_toktx(input_path, output_path, options=None):
     # target_type = options.get('target_type', 'RGBA')
     # cmd.extend(['--target_type', target_type])
 
-    # # Scale
-    scale = options.get('scale', 1.0)
-    cmd.extend(['--scale', str(scale)])
+    # Resize native ASTC textures to block-aligned dimensions. Passing exact dimensions
+    # also incorporates the user-selected downsample factor in a single resampling step.
+    resize = options.get('resize')
+    if resize is not None:
+        width, height = resize
+        cmd.extend(['--width', str(width), '--height', str(height)])
+    else:
+        scale = options.get('scale', 1.0)
+        cmd.extend(['--scale', str(scale)])
 
     # Mipmaps
     if options.get('mipmaps', False):

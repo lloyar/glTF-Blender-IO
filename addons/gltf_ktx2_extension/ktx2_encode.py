@@ -239,6 +239,27 @@ def encode_image_to_ktx2(gltf_image, target_format, compression_mode, quality_le
             'scale': scale,
         }
 
+        if target_format == 'ASTC':
+            dimension_info = ktx_tools.get_astc_aligned_dimensions(temp_png, astc_block_size, scale)
+            if dimension_info is None:
+                export_settings['log'].error(
+                    f"Could not determine image dimensions required for ASTC {astc_block_size} block alignment"
+                )
+                return None
+
+            source_dimensions, scaled_dimensions, aligned_dimensions = dimension_info
+            options['resize'] = aligned_dimensions
+
+            if aligned_dimensions != scaled_dimensions:
+                source_width, source_height = source_dimensions
+                scaled_width, scaled_height = scaled_dimensions
+                aligned_width, aligned_height = aligned_dimensions
+                export_settings['log'].info(
+                    f"Aligning ASTC texture from {scaled_width}x{scaled_height} to "
+                    f"{aligned_width}x{aligned_height} for {astc_block_size} blocks "
+                    f"(source: {source_width}x{source_height})"
+                )
+
         # Log the target format for debugging
         format_names = {
             'BASISU': 'Basis Universal',

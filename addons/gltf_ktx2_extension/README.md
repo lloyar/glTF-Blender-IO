@@ -22,6 +22,9 @@ Transcodes to any GPU format at runtime (BC7, ASTC, ETC2, etc.). Best compatibil
 ### Native ASTC (Direct GPU Upload)
 Native ASTC format that uploads directly to GPU without any transcoding.
 
+During export, texture dimensions are automatically resampled up to the nearest multiple of the selected ASTC block
+size. This keeps native ASTC textures compatible with WebGPU renderers such as wgpu/Bevy.
+
 | Block Size | Quality | Bits/pixel |
 |------------|---------|------------|
 | 4x4 | Highest | 8.00 bpp |
