@@ -167,7 +167,7 @@ def gather_track_animations(obj_uuid: int,
     current_action_slot = None
     current_sk_action = None
     current_sk_action_slot = None
-    current_world_matrix = None
+    current_basis_matrix = None
     current_use_nla = None
     current_use_nla_sk = None
     restore_track_mute = {}
@@ -179,7 +179,7 @@ def gather_track_animations(obj_uuid: int,
         current_action_slot = blender_object.animation_data.action_slot
         current_use_nla = blender_object.animation_data.use_nla
         restore_tweak_mode = blender_object.animation_data.use_tweak_mode
-    current_world_matrix = blender_object.matrix_world.copy()
+    current_basis_matrix = blender_object.matrix_basis.copy()
 
     if blender_object.type == "MESH" \
             and blender_object.data is not None \
@@ -332,7 +332,9 @@ def gather_track_animations(obj_uuid: int,
             for track in track_group.tracks:
                 blender_object.data.shape_keys.animation_data.nla_tracks[track.idx].mute = restore_track_mute["KEY"][track.idx]
 
-    blender_object.matrix_world = current_world_matrix
+    # Restore the local transform. The evaluated world matrix can include an animated parent at
+    # the last sampled frame, which would bake that parent transform into this object's local data.
+    blender_object.matrix_basis = current_basis_matrix
 
     export_user_extensions('animation_track_switch_loop_hook', export_settings, blender_object, True)
 

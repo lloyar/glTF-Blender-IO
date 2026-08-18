@@ -50,6 +50,12 @@ function blenderFileToGltf(blenderVersion, blenderPath, outDirName, done, option
     });
 }
 
+function runBlenderScript(blenderVersion, scriptPath, done) {
+    const { exec } = require('child_process');
+    const cmd = `${blenderVersion} --factory-startup -b -noaudio --python ${scriptPath}`;
+    exec(cmd, (error) => done(error));
+}
+
 function blenderRoundtripGltf(blenderVersion, gltfPath, outDirName, done, options = '') {
     const { exec } = require('child_process');
     const cmd = `${blenderVersion} -b --addons io_scene_gltf2 -noaudio --python roundtrip_gltf.py -- ${gltfPath} ${outDirName} ${options}`;
@@ -243,6 +249,10 @@ describe('Exporter', function () {
     let blenderSampleScenes = fs.readdirSync('scenes').filter(f => f.endsWith('.blend')).map(f => f.substring(0, f.length - 6));
 
     blenderVersions.forEach(function (blenderVersion) {
+        it(blenderVersion + '_nla_track_state_restore', function (done) {
+            runBlenderScript(blenderVersion, 'nla_track_state_restore.py', done);
+        });
+
         let variants = [
             ['', ''],
             ['_glb', '--glb']
