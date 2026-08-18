@@ -21,15 +21,19 @@ from .sampler import gather_data_sampled_animation_sampler
 
 
 def gather_data_sampled_channels(blender_type_data, blender_id, blender_action_name, slot_identifier,
-                                 additional_key, export_settings) -> typing.List[gltf2_io.AnimationChannel]:
+                                 additional_key, export_settings, paths=None) -> typing.List[gltf2_io.AnimationChannel]:
     channels = []
 
     list_of_animated_data_channels = {
         "hide_render": "STEP"
     }
 
+    available_paths = export_settings['KHR_animation_pointer'][blender_type_data][blender_id]['paths']
+    sampled_paths = available_paths.keys() if paths is None else (
+        path for path in paths if path in available_paths)
+
     baseColorFactor_alpha_merged_already_done = False
-    for path in export_settings['KHR_animation_pointer'][blender_type_data][blender_id]['paths'].keys():
+    for path in sampled_paths:
 
         # Do not manage alpha, as it will be managaed by the baseColorFactor (merging Color and alpha)
         if export_settings['KHR_animation_pointer'][blender_type_data][blender_id]['paths'][path][

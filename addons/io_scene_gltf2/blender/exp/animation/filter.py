@@ -1,108 +1,206 @@
 import bpy
 
 from ...com.data_path import get_channelbag_for_slot
-from ..animation.tracks import __get_nla_tracks_node_tree, __get_nla_tracks_obj
+from .tracks import __get_data_blender_tracks
+
+
+POINTER_TYPES = ('materials', 'lights', 'cameras', 'nodes')
 
 
 def filter_animation(export_settings):
-    vtree = export_settings['vtree']
-    for obj_uuid in vtree.get_all_objects():
-        blender_object = export_settings['vtree'].nodes[obj_uuid].blender_object
+    """Build the Pointer paths needed by each NLA track group.
 
-        obj_tracks_data = __get_nla_tracks_obj(obj_uuid, export_settings)
-        node_tree_tracks_data = __get_nla_tracks_node_tree(obj_uuid, export_settings)
+    Static resource gathering registers every Blender path that can be
+    represented by KHR_animation_pointer. Track baking needs only the paths
+    driven by the current group of NLA strips, plus the paths required to
+    calculate derived glTF properties.
+    """
+    export_settings.pop('gltf_pointer_animation_plan', None)
 
-        obj_tracks_data.extend(node_tree_tracks_data)
-
-        for track_data in obj_tracks_data.values():
-            nla_track = track_data.tracks[0]  # TrackData.tracks have only one NLATrack
-            if track_data.on_type == "OBJECT":
-                export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['used'] = True
-                nla_strip: bpy.types.NlaStrip = blender_object.animation_data.nla_tracks[nla_track.idx].strips[0]
-            elif track_data.on_type == "NODETREE":
-                blender_material = blender_object.active_material
-                export_settings['KHR_animation_pointer']['materials'][id(blender_material)]['used'] = True
-                nla_strip: bpy.types.NlaStrip = \
-                    blender_material.node_tree.animation_data.nla_tracks[nla_track.idx].strips[0]
-            else:
-                continue
-
-            track_action: bpy.types.Action = nla_strip.action
-            track_action_slot: bpy.types.ActionSlot = nla_strip.action_slot
-
-            channelbag = get_channelbag_for_slot(track_action, track_action_slot)
-            fcurves = channelbag.fcurves if channelbag else []
-            for fcurve in fcurves:
-                data_path = fcurve.data_path
-
-                if track_data.on_type == "OBJECT":
-                    if data_path == "hide_render":
-                        node_paths = export_settings['KHR_animation_pointer']['nodes'][id(blender_object)]['paths']
-                        mark_path_used(node_paths, data_path)
-                        if 'nla_track_idx' not in \
-                                node_paths[data_path]:
-                            node_paths[data_path]['nla_track_idx'] = []
-
-                        node_paths[data_path]['nla_track_idx'].append(nla_track.idx)
-
-                elif track_data.on_type == "NODETREE":
-                    node_name = data_path.split('nodes["')[1].split('"]')[0]
-                    node = blender_material.node_tree.nodes[node_name]
-                    material_paths = export_settings['KHR_animation_pointer']['materials'][id(blender_material)][
-                        'paths']
-                    if node.type == 'MAPPING':
-                        mark_path_used(material_paths, f'node_tree.nodes["{node_name}"].inputs[1].default_value')
-                        mark_path_used(material_paths, f'node_tree.nodes["{node_name}"].inputs[3].default_value')
-                        mark_path_used(material_paths, f'node_tree.nodes["{node_name}"].inputs[2].default_value[2]')
-                    elif data_path.startswith("nodes[\"Principled BSDF\"].inputs"):
-                        # TODO(lloyar): process
-                        mark_path_used(material_paths, f'node_tree.{data_path}')
-                    else:
-                        pass
-                else:
-                    continue
-
-    delete_unused_pointer(export_settings, 'nodes')
-    delete_unused_pointer(export_settings, 'materials')
-
-    # for node_id in list(export_settings['KHR_animation_pointer']['nodes'].keys()):
-    #     if 'used' not in export_settings['KHR_animation_pointer']['nodes'][node_id]:
-    #         del export_settings['KHR_animation_pointer']['nodes'][node_id]
-    #     else:
-    #         for path in list(export_settings['KHR_animation_pointer']['nodes'][node_id]['paths'].keys()):
-    #             if 'used' not in export_settings['KHR_animation_pointer']['nodes'][node_id]['paths'][path]:
-    #                 del export_settings['KHR_animation_pointer']['nodes'][node_id]['paths'][path]
-    #
-    # for material_id in list(export_settings['KHR_animation_pointer']['materials'].keys()):
-    #     if 'used' not in export_settings['KHR_animation_pointer']['materials'][material_id]:
-    #         del export_settings['KHR_animation_pointer']['materials'][material_id]
-    #     else:
-    #         for path in list(export_settings['KHR_animation_pointer']['materials'][material_id]['paths'].keys()):
-    #             if 'used' not in export_settings['KHR_animation_pointer']['materials'][material_id]['paths'][path]:
-    #                 del export_settings['KHR_animation_pointer']['materials'][material_id]['paths'][path]
-
-
-def mark_path_used(paths, data_path):
-    path = paths.get(data_path)
-    if path is None or path.get('used') is True:
+    # Scene baking intentionally samples the evaluated scene. Filtering it by
+    # NLA F-Curves would discard drivers and other scene-level animation.
+    if export_settings['gltf_animation_mode'] != 'NLA_TRACKS':
         return
 
-    path['used'] = True
+    pointer_plan = {blender_type_data: {} for blender_type_data in POINTER_TYPES}
 
-    # Some glTF animation channels are calculated from multiple Blender
-    # properties. Keep those source properties available to the sampling cache,
-    # even when only one of them has an F-Curve in the current NLA track.
-    for dependency_name in ('strength_channel', 'factor_channel'):
-        dependency_path = path.get(dependency_name)
-        if dependency_path is not None:
-            mark_path_used(paths, dependency_path)
+    for blender_type_data in POINTER_TYPES:
+        registry = export_settings['KHR_animation_pointer'][blender_type_data]
+        for blender_id in list(registry.keys()):
+            blender_data_object = _get_blender_data_object(
+                blender_type_data, blender_id, export_settings)
+            if blender_data_object is None:
+                # Generated materials (for example from Geometry Nodes) have
+                # no Blender animation data to inspect or sample.
+                del registry[blender_id]
+                continue
+            tracks_data = __get_data_blender_tracks(blender_type_data, blender_id, export_settings)
+            resource_plan = {}
+
+            for track_data in tracks_data.values():
+                paths = _get_track_paths(
+                    blender_type_data,
+                    blender_data_object,
+                    track_data,
+                    registry[blender_id]['paths'])
+                if len(paths) > 0:
+                    resource_plan[track_data.plan_key] = paths
+
+            if len(resource_plan) > 0:
+                pointer_plan[blender_type_data][blender_id] = resource_plan
+            else:
+                # Avoid entering gather_data_track_animations for resources
+                # that do not animate a supported Pointer property.
+                del registry[blender_id]
+
+    export_settings['gltf_pointer_animation_plan'] = pointer_plan
 
 
-def delete_unused_pointer(export_settings, type_str):
-    for id in list(export_settings['KHR_animation_pointer'][type_str].keys()):
-        if 'used' not in export_settings['KHR_animation_pointer'][type_str][id]:
-            del export_settings['KHR_animation_pointer'][type_str][id]
-        else:
-            for path in list(export_settings['KHR_animation_pointer'][type_str][id]['paths'].keys()):
-                if 'used' not in export_settings['KHR_animation_pointer'][type_str][id]['paths'][path]:
-                    del export_settings['KHR_animation_pointer'][type_str][id]['paths'][path]
+def _get_blender_data_object(blender_type_data, blender_id, export_settings):
+    if blender_type_data == 'materials':
+        if export_settings['gltf_apply'] is True:
+            return export_settings['material_identifiers'].get(blender_id)
+        return next((material for material in bpy.data.materials if id(material) == blender_id), None)
+    if blender_type_data == 'lights':
+        return next((light for light in bpy.data.lights if id(light) == blender_id), None)
+    if blender_type_data == 'cameras':
+        return next((camera for camera in bpy.data.cameras if id(camera) == blender_id), None)
+    if blender_type_data == 'nodes':
+        return next((obj for obj in bpy.data.objects if id(obj) == blender_id), None)
+    raise ValueError("Unsupported animation pointer data type: {}".format(blender_type_data))
+
+
+def _get_track_paths(blender_type_data, blender_data_object, track_data, registered_paths):
+    animation_data = _get_animation_data(blender_data_object, track_data.on_type)
+    if animation_data is None:
+        return ()
+
+    selected = set()
+    has_fcurves = False
+    for fcurve in _iter_track_fcurves(animation_data, track_data):
+        has_fcurves = True
+        _mark_fcurve_paths(
+            blender_type_data,
+            track_data.on_type,
+            fcurve.data_path,
+            fcurve.array_index,
+            registered_paths,
+            selected)
+
+    # Some evaluated properties do not use the same RNA path as their source
+    # F-Curve (camera lens -> angle, for example). Preserve the old behavior
+    # for such uncommon tracks, but only for this one resource and track.
+    if blender_type_data in ('cameras', 'lights') and has_fcurves and len(selected) == 0:
+        selected.update(registered_paths.keys())
+
+    # Drivers have no Action/Strip. If the data block has a matching NLA
+    # track, keep its driven Pointer path for every track group because the
+    # evaluated value may depend on that track.
+    for fcurve in animation_data.drivers:
+        _mark_fcurve_paths(
+            blender_type_data,
+            track_data.on_type,
+            fcurve.data_path,
+            fcurve.array_index,
+            registered_paths,
+            selected)
+
+    _expand_dependencies(registered_paths, selected)
+    return tuple(path for path in registered_paths.keys() if path in selected)
+
+
+def _get_animation_data(blender_data_object, on_type):
+    if on_type == 'NODETREE':
+        node_tree = getattr(blender_data_object, 'node_tree', None)
+        return None if node_tree is None else node_tree.animation_data
+    return blender_data_object.animation_data
+
+
+def _iter_track_fcurves(animation_data, track_data):
+    for nla_track in track_data.tracks:
+        track = animation_data.nla_tracks[nla_track.idx]
+        for strip in track.strips:
+            action = strip.action
+            if action is None:
+                continue
+            channelbag = get_channelbag_for_slot(action, strip.action_slot)
+            if channelbag is None:
+                continue
+            yield from channelbag.fcurves
+
+
+def _mark_fcurve_paths(
+        blender_type_data,
+        on_type,
+        data_path,
+        array_index,
+        registered_paths,
+        selected):
+    source_path = "node_tree." + data_path if on_type == 'NODETREE' else data_path
+    candidates = {source_path, "{}[{}]".format(source_path, array_index)}
+
+    for candidate in candidates:
+        if candidate in registered_paths:
+            selected.add(candidate)
+
+    # Some glTF values are calculated from a differently named Blender
+    # property, such as spot_blend + spot_size -> innerConeAngle.
+    for path, path_data in registered_paths.items():
+        if path_data.get('additional_path') in candidates:
+            selected.add(path)
+
+    # One Blender orthographic scale produces both glTF magnitudes.
+    if blender_type_data == 'cameras' and data_path == 'ortho_scale':
+        selected.update(path for path in ('ortho_scale_x', 'ortho_scale_y') if path in registered_paths)
+
+    # Perspective FOV is registered as the evaluated ``angle`` property, but
+    # Blender normally writes camera animation to ``lens``.
+    if blender_type_data == 'cameras' and data_path in ('lens', 'sensor_width'):
+        selected.update(
+            path for path, path_data in registered_paths.items()
+            if path_data['path'].endswith('/perspective/yfov'))
+
+    # In Cycles the exported light color can be the product of the light data
+    # color and an emission-node color. Either source should select the glTF
+    # color channel.
+    if blender_type_data == 'lights' and on_type == 'LIGHT' and data_path == 'color':
+        selected.update(
+            path for path, path_data in registered_paths.items()
+            if path_data['path'].endswith('/color'))
+
+
+def _expand_dependencies(registered_paths, selected):
+    pending = list(selected)
+    while pending:
+        path = pending.pop()
+        path_data = registered_paths[path]
+
+        dependencies = []
+        for dependency_name in ('strength_channel', 'factor_channel'):
+            dependency = path_data.get(dependency_name)
+            if dependency in registered_paths:
+                dependencies.append(dependency)
+
+        pointer = path_data['path']
+        # Multiple Blender inputs can form one glTF property (base color and
+        # alpha), while texture transform and specular conversion require a
+        # small group of related glTF properties to be sampled together.
+        if pointer == '/materials/XXX/pbrMetallicRoughness/baseColorFactor':
+            dependencies.extend(
+                candidate for candidate, candidate_data in registered_paths.items()
+                if candidate_data['path'] == pointer)
+        elif 'KHR_texture_transform' in pointer:
+            pointer_parent = pointer.rsplit('/', 1)[0]
+            dependencies.extend(
+                candidate for candidate, candidate_data in registered_paths.items()
+                if candidate_data['path'].rsplit('/', 1)[0] == pointer_parent)
+        elif pointer.endswith('/specularFactor') or pointer.endswith('/specularColorFactor'):
+            pointer_parent = pointer.rsplit('/', 1)[0]
+            dependencies.extend(
+                candidate for candidate, candidate_data in registered_paths.items()
+                if candidate_data['path'].rsplit('/', 1)[0] == pointer_parent)
+
+        for dependency in dependencies:
+            if dependency not in selected:
+                selected.add(dependency)
+                pending.append(dependency)

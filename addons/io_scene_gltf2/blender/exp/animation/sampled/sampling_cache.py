@@ -15,6 +15,7 @@
 import mathutils
 import bpy
 import typing
+import time
 from .....blender.com.data_path import get_sk_exported
 from .....blender.com.conversion import inverted_trs_mapping_node, texture_transform_blender_to_gltf, yvof_blender_to_gltf
 from ...cache import datacache
@@ -22,6 +23,78 @@ from ...tree import VExportNode
 from ..drivers import get_sk_drivers
 
 # Warning : If you change some parameter here, need to be changed in cache system
+
+
+def set_sampling_scope(export_settings, object_uuids=None, pointer_targets=None):
+    """Limit the data collected by the next sampling cache build.
+
+    ``None`` means "all", while an empty collection means "none". Pointer
+    targets are stored as ``{type: {blender_id: paths}}``. This scope is used
+    only by NLA track baking; the other animation modes keep their existing
+    scene-wide cache behavior.
+    """
+    export_settings['gltf_sampling_scope'] = {
+        'object_uuids': None if object_uuids is None else tuple(object_uuids),
+        'pointer_targets': pointer_targets,
+    }
+
+
+def clear_sampling_scope(export_settings):
+    export_settings.pop('gltf_sampling_scope', None)
+
+
+def reset_sampling_stats(export_settings):
+    export_settings['gltf_sampling_stats'] = {
+        'cache_builds': 0,
+        'frames': 0,
+        'frame_set_seconds': 0.0,
+        'object_seconds': 0.0,
+        'pointer_seconds': 0.0,
+    }
+
+
+def log_sampling_stats(export_settings):
+    stats = export_settings.get('gltf_sampling_stats')
+    if stats is None or stats['cache_builds'] == 0:
+        return
+
+    export_settings['log'].info(
+        "Animation sampling: {} cache builds, {} evaluated frames, "
+        "frame_set {:.3f}s, objects {:.3f}s, pointers {:.3f}s".format(
+            stats['cache_builds'],
+            stats['frames'],
+            stats['frame_set_seconds'],
+            stats['object_seconds'],
+            stats['pointer_seconds']))
+
+
+def _sampling_stats(export_settings):
+    if 'gltf_sampling_stats' not in export_settings:
+        reset_sampling_stats(export_settings)
+    return export_settings['gltf_sampling_stats']
+
+
+def _iter_pointer_targets(blender_type_data, export_settings, scoped_targets):
+    registry = export_settings['KHR_animation_pointer'][blender_type_data]
+
+    if scoped_targets is None:
+        target_ids = registry.keys()
+    else:
+        target_ids = scoped_targets.keys()
+
+    for blender_id in target_ids:
+        if blender_id not in registry:
+            continue
+
+        available_paths = registry[blender_id]['paths']
+        requested_paths = None if scoped_targets is None else scoped_targets[blender_id]
+        if requested_paths is None:
+            paths = tuple(available_paths.keys())
+        else:
+            paths = tuple(path for path in requested_paths if path in available_paths)
+
+        if len(paths) > 0:
+            yield blender_id, paths
 
 
 @datacache
@@ -37,9 +110,17 @@ def get_cache_data(path: str,
                    ):
 
     data = {}
+    stats = None
+    if export_settings['gltf_animation_mode'] == "NLA_TRACKS":
+        stats = _sampling_stats(export_settings)
+        stats['cache_builds'] += 1
 
     # Ranges are stored at action level, so no need to give the slot_identifier here
     min_, max_ = get_range(blender_obj_uuid, action_name, export_settings)
+
+    scope = None
+    if export_settings['gltf_animation_mode'] == "NLA_TRACKS":
+        scope = export_settings.get('gltf_sampling_scope')
 
     if only_gather_provided:
         # If object is not in vtree, this is a material or light for pointers
@@ -48,28 +129,55 @@ def get_cache_data(path: str,
         obj_uuids = [uid for (uid, n) in export_settings['vtree'].nodes.items()
                      if n.blender_type not in [VExportNode.BONE]]
 
+    if scope is not None and scope['object_uuids'] is not None:
+        obj_uuids = list(scope['object_uuids'])
     # For TRACK mode, we reset cache after each track export, so we don't need to keep others objects
-    if export_settings['gltf_animation_mode'] in ["NLA_TRACKS"]:
+    elif export_settings['gltf_animation_mode'] in ["NLA_TRACKS"]:
         # If object is not in vtree, this is a material or light for pointers
         obj_uuids = [blender_obj_uuid] if blender_obj_uuid in export_settings['vtree'].nodes.keys() else []
+
+    pointer_targets = None if scope is None else scope['pointer_targets']
+    cache_pointer_data = export_settings['gltf_export_anim_pointer'] is True and pointer_targets != {}
+    if cache_pointer_data:
+        material_targets = None if pointer_targets is None else pointer_targets.get('materials', {})
+        light_targets = None if pointer_targets is None else pointer_targets.get('lights', {})
+        camera_targets = None if pointer_targets is None else pointer_targets.get('cameras', {})
+        node_targets = None if pointer_targets is None else pointer_targets.get('nodes', {})
 
     depsgraph = bpy.context.evaluated_depsgraph_get()
 
     frame = min_
     while frame <= max_:
-        bpy.context.scene.frame_set(int(frame))
+        if stats is None:
+            bpy.context.scene.frame_set(int(frame))
+        else:
+            start = time.perf_counter()
+            bpy.context.scene.frame_set(int(frame))
+            stats['frame_set_seconds'] += time.perf_counter() - start
+            stats['frames'] += 1
         current_instance = {}  # For GN instances, we are going to track instances by their order in instance iterator
 
-        object_caching(data, obj_uuids, current_instance, action_name,
-                       slot_identifier, frame, depsgraph, export_settings)
+        if stats is None:
+            object_caching(data, obj_uuids, current_instance, action_name,
+                           slot_identifier, frame, depsgraph, export_settings)
+        else:
+            start = time.perf_counter()
+            object_caching(data, obj_uuids, current_instance, action_name,
+                           slot_identifier, frame, depsgraph, export_settings)
+            stats['object_seconds'] += time.perf_counter() - start
 
         # KHR_animation_pointer caching for materials, lights, cameras
-        if export_settings['gltf_export_anim_pointer'] is True:
-            material_nodetree_caching(data, action_name, slot_identifier, frame, export_settings)
-            material_caching(data, action_name, slot_identifier, frame, export_settings)
-            light_nodetree_caching(data, action_name, slot_identifier, frame, export_settings)
-            camera_caching(data, action_name, slot_identifier, frame, export_settings)
-            node_visibility_caching(data, action_name, slot_identifier, frame, export_settings)
+        if cache_pointer_data:
+            if stats is not None:
+                start = time.perf_counter()
+            material_nodetree_caching(
+                data, action_name, slot_identifier, frame, export_settings, material_targets)
+            material_caching(data, action_name, slot_identifier, frame, export_settings, material_targets)
+            light_nodetree_caching(data, action_name, slot_identifier, frame, export_settings, light_targets)
+            camera_caching(data, action_name, slot_identifier, frame, export_settings, camera_targets)
+            node_visibility_caching(data, action_name, slot_identifier, frame, export_settings, node_targets)
+            if stats is not None:
+                stats['pointer_seconds'] += time.perf_counter() - start
 
         frame += step
 
@@ -107,11 +215,9 @@ def initialize_data_dict(data, key1, key2, key3, key4, key5):
         data[key1][key2][key3][key4][key5] = {}
 
 
-def node_visibility_caching(data, action_name, slot_identifier, frame, export_settings):
+def node_visibility_caching(data, action_name, slot_identifier, frame, export_settings, scoped_targets=None):
     # Cache Blender object visibility for KHR_node_visibility via KHR_animation_pointer
-    for node_id in export_settings['KHR_animation_pointer']['nodes'].keys():
-        if len(export_settings['KHR_animation_pointer']['nodes'][node_id]['paths']) == 0:
-            continue
+    for node_id, paths in _iter_pointer_targets('nodes', export_settings, scoped_targets):
 
         blender_objects = [o for o in bpy.data.objects if id(o) == node_id]
         if len(blender_objects) == 0:
@@ -136,27 +242,25 @@ def node_visibility_caching(data, action_name, slot_identifier, frame, export_se
             data[key1][key2] = {}
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
-            for path in export_settings['KHR_animation_pointer']['nodes'][node_id]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
 
         if key3 not in data[key1][key2].keys():
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
-            for path in export_settings['KHR_animation_pointer']['nodes'][node_id]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
 
         # Store hide_render as 1.0 when hidden, 0.0 when visible; will be reversed in keyframes to get 'visible'
-        for path in export_settings['KHR_animation_pointer']['nodes'][node_id]['paths'].keys():
+        for path in paths:
             if path != "hide_render":
                 continue
             val = 1.0 if blender_object.hide_render else 0.0
             data[key1][key2][key3][key4][path][frame] = val
 
 
-def material_caching(data, action_name, slot_identifier, frame, export_settings):
-    for mat in export_settings['KHR_animation_pointer']['materials'].keys():
-        if len(export_settings['KHR_animation_pointer']['materials'][mat]['paths']) == 0:
-            continue
+def material_caching(data, action_name, slot_identifier, frame, export_settings, scoped_targets=None):
+    for mat, paths in _iter_pointer_targets('materials', export_settings, scoped_targets):
 
         if export_settings['gltf_animation_mode'] == "NLA_TRACKS" and export_settings['gltf_apply'] is True:
             blender_material = [export_settings['material_identifiers'][mat]]
@@ -188,17 +292,17 @@ def material_caching(data, action_name, slot_identifier, frame, export_settings)
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
 
-            for path in export_settings['KHR_animation_pointer']['materials'][mat]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
 
         if key3 not in data[key1][key2].keys():
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
 
-            for path in export_settings['KHR_animation_pointer']['materials'][mat]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
 
-        for path in export_settings['KHR_animation_pointer']['materials'][mat]['paths'].keys():
+        for path in paths:
 
             if path.startswith("node_tree"):
                 continue
@@ -210,11 +314,9 @@ def material_caching(data, action_name, slot_identifier, frame, export_settings)
                 data[key1][key2][key3][key4][path][frame] = list(val)
 
 
-def material_nodetree_caching(data, action_name, slot_identifier, frame, export_settings):
+def material_nodetree_caching(data, action_name, slot_identifier, frame, export_settings, scoped_targets=None):
     # After caching objects, caching materials, for KHR_animation_pointer
-    for mat in export_settings['KHR_animation_pointer']['materials'].keys():
-        if len(export_settings['KHR_animation_pointer']['materials'][mat]['paths']) == 0:
-            continue
+    for mat, paths in _iter_pointer_targets('materials', export_settings, scoped_targets):
 
         if export_settings['gltf_animation_mode'] == "NLA_TRACKS" and export_settings['gltf_apply'] is True:
             blender_material = [export_settings['material_identifiers'][mat]]
@@ -245,17 +347,17 @@ def material_nodetree_caching(data, action_name, slot_identifier, frame, export_
             data[key1][key2] = {}
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
-            for path in export_settings['KHR_animation_pointer']['materials'][mat]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
 
         if key3 not in data[key1][key2].keys():
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
-            for path in export_settings['KHR_animation_pointer']['materials'][mat]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
 
         baseColorFactor_alpha_merged_already_done = False
-        for path in export_settings['KHR_animation_pointer']['materials'][mat]['paths'].keys():
+        for path in paths:
 
             if not path.startswith("node_tree"):
                 continue
@@ -628,11 +730,9 @@ def object_caching(data, obj_uuids, current_instance, action_name, slot_identifi
                     cache_sk = False
 
 
-def light_nodetree_caching(data, action_name, slot_identifier, frame, export_settings):
+def light_nodetree_caching(data, action_name, slot_identifier, frame, export_settings, scoped_targets=None):
     # After caching materials, caching lights, for KHR_animation_pointer
-    for light in export_settings['KHR_animation_pointer']['lights'].keys():
-        if len(export_settings['KHR_animation_pointer']['lights'][light]['paths']) == 0:
-            continue
+    for light, paths in _iter_pointer_targets('lights', export_settings, scoped_targets):
 
         blender_light = [m for m in bpy.data.lights if id(m) == light][0]
         if light not in data.keys():
@@ -655,15 +755,15 @@ def light_nodetree_caching(data, action_name, slot_identifier, frame, export_set
             data[key1][key2] = {}
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
-            for path in export_settings['KHR_animation_pointer']['lights'][light]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
         if key3 not in data[key1][key2].keys():
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
-            for path in export_settings['KHR_animation_pointer']['lights'][light]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
 
-        for path in export_settings['KHR_animation_pointer']['lights'][light]['paths'].keys():
+        for path in paths:
             val = blender_light.path_resolve(path)
             if type(val).__name__ == "float":
                 data[key1][key2][key3][key4][path][frame] = val
@@ -726,11 +826,9 @@ def light_caching(data, action_name, slot_identifier, frame, export_settings):
                     data[key1][key2][key3][key4][path][frame] = list(val)
 
 
-def camera_caching(data, action_name, slot_identifier, frame, export_settings):
+def camera_caching(data, action_name, slot_identifier, frame, export_settings, scoped_targets=None):
     # After caching lights, caching cameras, for KHR_animation_pointer
-    for cam in export_settings['KHR_animation_pointer']['cameras'].keys():
-        if len(export_settings['KHR_animation_pointer']['cameras'][cam]['paths']) == 0:
-            continue
+    for cam, paths in _iter_pointer_targets('cameras', export_settings, scoped_targets):
 
         blender_camera = [m for m in bpy.data.cameras if id(m) == cam][0]
         if cam not in data.keys():
@@ -753,16 +851,16 @@ def camera_caching(data, action_name, slot_identifier, frame, export_settings):
             data[key1][key2] = {}
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
-            for path in export_settings['KHR_animation_pointer']['cameras'][cam]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
 
         if key3 not in data[key1][key2].keys():
             data[key1][key2][key3] = {}
             data[key1][key2][key3][key4] = {}
-            for path in export_settings['KHR_animation_pointer']['cameras'][cam]['paths'].keys():
+            for path in paths:
                 data[key1][key2][key3][key4][path] = {}
 
-        for path in export_settings['KHR_animation_pointer']['cameras'][cam]['paths'].keys():
+        for path in paths:
             _render = bpy.context.scene.render
             width = _render.pixel_aspect_x * _render.resolution_x
             height = _render.pixel_aspect_y * _render.resolution_y

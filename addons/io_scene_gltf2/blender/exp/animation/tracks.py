@@ -55,6 +55,10 @@ class TrackData:
         self.name = track_name
         self.on_type = on_type
 
+    @property
+    def plan_key(self):
+        return self.on_type, tuple(track.idx for track in self.tracks)
+
 
 def gather_tracks_animations(export_settings):
 
@@ -735,6 +739,13 @@ def gather_data_track_animations(
 
     # Export all collected tracks.
     for track_data in blender_tracks.values():
+        pointer_plan = export_settings.get('gltf_pointer_animation_plan')
+        paths = None
+        if pointer_plan is not None:
+            paths = pointer_plan.get(blender_type_data, {}).get(blender_id, {}).get(track_data.plan_key, ())
+            if len(paths) == 0:
+                continue
+
         prepare_tracks_range(blender_id, track_data, export_settings, with_driver=False)
 
         if track_data.on_type in ["MATERIAL", "CAMERA", "LIGHT", "OBJECT"]:
@@ -746,22 +757,16 @@ def gather_data_track_animations(
             for track in track_data.tracks:
                 blender_data_object.node_tree.animation_data.nla_tracks[track.idx].mute = False
 
-        # Export animation
-        has_animation = True
-        if track_data.on_type == "OBJECT":
-            if ("hide_render" not in export_settings['KHR_animation_pointer']['nodes'][blender_id]['paths']
-                    or 'nla_track_idx' not in export_settings['KHR_animation_pointer']['nodes'][blender_id]['paths']['hide_render']):
-                has_animation = False
-            else:
-                has_animation = track_data.tracks[0].idx in \
-                                export_settings['KHR_animation_pointer']['nodes'][blender_id]['paths']['hide_render'][
-                                    'nla_track_idx']
-
-        if has_animation:
-            animation = bake_data_animation(blender_type_data, blender_id, track_data.name, None, track_data.on_type, export_settings)
-            get_cache_data.reset_cache()
-        else:
-            animation = None
+        # Export only the Pointer paths selected for this exact track group.
+        animation = bake_data_animation(
+            blender_type_data,
+            blender_id,
+            track_data.name,
+            None,
+            track_data.on_type,
+            export_settings,
+            paths=paths)
+        get_cache_data.reset_cache()
         if animation is not None:
             animations.append(animation)
 

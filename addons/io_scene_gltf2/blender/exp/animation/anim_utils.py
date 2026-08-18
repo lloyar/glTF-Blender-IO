@@ -23,6 +23,7 @@ from .sampled.armature.action_sampled import gather_action_armature_sampled
 from .sampled.object.action_sampled import gather_action_object_sampled
 from .sampled.shapekeys.channels import gather_sampled_sk_channel
 from .sampled.data.channels import gather_data_sampled_channels
+from .sampled.sampling_cache import set_sampling_scope
 from .drivers import get_sk_drivers
 
 
@@ -202,6 +203,11 @@ def bake_animation(obj_uuid: str, animation_key: str, export_settings, mode=None
     if len(bpy.data.actions) == 0:
         return None
 
+    if export_settings['gltf_animation_mode'] == "NLA_TRACKS":
+        # Object, bone and shape-key baking does not need material/camera/light
+        # pointer data. Avoid scanning the complete pointer registry per frame.
+        set_sampling_scope(export_settings, object_uuids=(obj_uuid,), pointer_targets={})
+
     blender_object = export_settings['vtree'].nodes[obj_uuid].blender_object
 
     # No TRS animation are found for this object.
@@ -286,10 +292,25 @@ def bake_animation(obj_uuid: str, animation_key: str, export_settings, mode=None
     return None
 
 
-def bake_data_animation(blender_type_data, blender_id, animation_key, slot_identifier, on_type, export_settings):
+def bake_data_animation(
+        blender_type_data,
+        blender_id,
+        animation_key,
+        slot_identifier,
+        on_type,
+        export_settings,
+        paths=None):
     # if there is no animation in file => no need to bake
     if len(bpy.data.actions) == 0:
         return None
+
+    if export_settings['gltf_animation_mode'] == "NLA_TRACKS":
+        # Pointer tracks need only the current resource and the paths selected
+        # for this track. Object matrices are exported by the regular branch.
+        set_sampling_scope(
+            export_settings,
+            object_uuids=(),
+            pointer_targets={blender_type_data: {blender_id: paths}})
 
     total_channels = []
     animation = None
@@ -317,7 +338,7 @@ def bake_data_animation(blender_type_data, blender_id, animation_key, slot_ident
                 continue
 
             channels = gather_data_sampled_channels(
-                blender_type_data, i, animation_key, slot_identifier, on_type, export_settings)
+                blender_type_data, i, animation_key, slot_identifier, on_type, export_settings, paths=paths)
             if channels is not None:
                 total_channels.extend(channels)
 

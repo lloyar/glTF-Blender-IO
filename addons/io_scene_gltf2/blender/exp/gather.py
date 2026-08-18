@@ -22,7 +22,8 @@ from .cache import cached
 from . import nodes as gltf2_blender_gather_nodes
 from . import joints as gltf2_blender_gather_joints
 from . import tree as gltf2_blender_gather_tree
-from .animation.sampled.object.keyframes import get_cache_data
+from .animation.sampled.sampling_cache import \
+    clear_sampling_scope, get_cache_data, log_sampling_stats, reset_sampling_stats
 from .animation.animations import gather_animations
 
 
@@ -56,7 +57,13 @@ def gather_gltf2(export_settings):
         if export_settings['gltf_animations']:
             # resetting object cache
             get_cache_data.reset_cache()
+            clear_sampling_scope(export_settings)
+            if export_settings['gltf_animation_mode'] == "NLA_TRACKS":
+                reset_sampling_stats(export_settings)
             animations += gather_animations(export_settings)
+            if export_settings['gltf_animation_mode'] == "NLA_TRACKS":
+                log_sampling_stats(export_settings)
+            clear_sampling_scope(export_settings)
         if bpy.context.scene.name == store_user_scene.name:
             active_scene = len(scenes) - 1
 
