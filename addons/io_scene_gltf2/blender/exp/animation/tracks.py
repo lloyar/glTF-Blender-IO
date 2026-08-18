@@ -674,9 +674,30 @@ def gather_data_track_animations(
     if blender_type_data in ["materials", "lights"] \
             and blender_data_object.node_tree is not None \
             and blender_data_object.node_tree.animation_data is not None:
-        current_nodetree_action = blender_data_object.node_tree.animation_data.action
-        current_nodetree_action_slot = blender_data_object.node_tree.animation_data.action_slot
-        current_use_nla_node_tree = blender_data_object.node_tree.animation_data.use_nla
+        node_tree_animation_data = blender_data_object.node_tree.animation_data
+        current_nodetree_action = node_tree_animation_data.action
+        current_nodetree_action_slot = node_tree_animation_data.action_slot
+        current_use_nla_node_tree = node_tree_animation_data.use_nla
+
+        # Blender 5.2 does not build NLA evaluation relations for a node tree
+        # when every track was muted when the file was loaded. Merely unmuting
+        # a track later leaves its properties at their static values. Binding
+        # one strip action once makes Blender rebuild those relations; the
+        # original action and NLA state are restored after export below.
+        if node_tree_animation_data.action is not None:
+            node_tree_animation_data.action_slot = None
+        node_tree_animation_data.action = None
+        node_tree_animation_data.use_nla = True
+        first_strip = next((
+            track.strips[0]
+            for track in node_tree_animation_data.nla_tracks
+            if len(track.strips) > 0
+        ), None)
+        if first_strip is not None:
+            node_tree_animation_data.action = first_strip.action
+            node_tree_animation_data.action_slot = first_strip.action_slot
+            node_tree_animation_data.action_slot = None
+            node_tree_animation_data.action = None
 
     # Prepare export for obj
     solo_track = None
