@@ -30,6 +30,7 @@ from ..com import json_util
 from . import gather as gltf2_blender_gather
 from . import ibl
 from .exporter import GlTF2Exporter
+from .material.extensions.billboard import DS_MATERIALS_BILLBOARD_EXTENSION_NAME
 
 
 def save(context, export_settings):
@@ -534,7 +535,7 @@ def __fix_json(obj, export_settings, passthrough_extensions=[]):
 
 
 def __should_include_json_value(key, value, export_settings):
-    allowed_empty_collections = ["KHR_materials_unlit"]
+    allowed_empty_collections = ["KHR_materials_unlit", DS_MATERIALS_BILLBOARD_EXTENSION_NAME]
     allowed_empty_collections_if_animated = \
         [
             "KHR_materials_specular",

@@ -13,7 +13,11 @@
 # limitations under the License.
 
 import bpy
-from ..com.material_helpers import get_gltf_node_name, create_settings_group
+from ..com.material_helpers import \
+    get_gltf_node_name, \
+    create_settings_group, \
+    get_ds_billboard_node_name, \
+    create_ds_billboard_group
 
 ################ glTF Material Output node ###########################################
 
@@ -53,9 +57,37 @@ class NODE_OT_GLTF_SETTINGS(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class NODE_OT_DS_BILLBOARD_SETTINGS(bpy.types.Operator):
+    bl_idname = "node.ds_billboard_settings_node_operator"
+    bl_label = "DS Billboard Material Output"
+    bl_description = "Mark the active material for export as a screen-aligned DS billboard"
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return (
+            space is not None
+            and space.type == "NODE_EDITOR"
+            and context.object and context.object.active_material
+            and bpy.context.preferences.addons['io_scene_gltf2'].preferences.settings_node_ui is True
+        )
+
+    def execute(self, context):
+        group_name = get_ds_billboard_node_name()
+        if group_name in bpy.data.node_groups:
+            group = bpy.data.node_groups[group_name]
+        else:
+            group = create_ds_billboard_group(group_name)
+        node_tree = context.object.active_material.node_tree
+        new_node = node_tree.nodes.new("ShaderNodeGroup")
+        new_node.node_tree = group
+        return {"FINISHED"}
+
+
 def add_gltf_settings_to_menu(self, context):
     if bpy.context.preferences.addons['io_scene_gltf2'].preferences.settings_node_ui is True:
         self.layout.operator("node.gltf_settings_node_operator")
+        self.layout.operator("node.ds_billboard_settings_node_operator")
 
 
 class DSEnvironmentMapProperties(bpy.types.PropertyGroup):
@@ -1019,6 +1051,7 @@ def export_panel_animation_action_filter(layout, operator):
 
 def register():
     bpy.utils.register_class(NODE_OT_GLTF_SETTINGS)
+    bpy.utils.register_class(NODE_OT_DS_BILLBOARD_SETTINGS)
     bpy.utils.register_class(DSEnvironmentMapProperties)
     bpy.utils.register_class(WORLD_PT_ds_environment_map)
     bpy.utils.register_class(DSAnimationReferenceProperties)
@@ -1065,6 +1098,7 @@ def variant_register():
 
 
 def unregister():
+    bpy.types.NODE_MT_category_shader_output.remove(add_gltf_settings_to_menu)
     del bpy.types.Scene.ds_animation_state_active_index
     del bpy.types.Scene.ds_animation_states
     del bpy.types.Scene.ds_environment_map
@@ -1079,6 +1113,7 @@ def unregister():
     bpy.utils.unregister_class(DSAnimationReferenceProperties)
     bpy.utils.unregister_class(WORLD_PT_ds_environment_map)
     bpy.utils.unregister_class(DSEnvironmentMapProperties)
+    bpy.utils.unregister_class(NODE_OT_DS_BILLBOARD_SETTINGS)
     bpy.utils.unregister_class(NODE_OT_GLTF_SETTINGS)
     action_filter_unregister()
 

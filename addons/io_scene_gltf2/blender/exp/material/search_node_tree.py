@@ -20,7 +20,11 @@ import bpy
 from io_scene_gltf2.blender.exp.cache import cached
 from mathutils import Vector, Matrix
 from ....blender.exp.cache import cached
-from ...com.material_helpers import get_gltf_node_name, get_gltf_node_old_name, get_gltf_old_group_node_name
+from ...com.material_helpers import \
+    get_gltf_node_name, \
+    get_gltf_node_old_name, \
+    get_gltf_old_group_node_name, \
+    get_ds_billboard_node_name
 from ....blender.com.conversion import texture_transform_blender_to_gltf, inverted_trs_mapping_node
 import typing
 
@@ -219,6 +223,23 @@ def get_socket_from_gltf_material_node(blender_material_nodetree, name: str):
             return NodeSocket(inputs[0][0], inputs[0][1])
 
     return NodeSocket(None, None)
+
+
+def has_ds_billboard_node(blender_material_nodetree):
+    """Return whether a material contains an active DS billboard marker node."""
+    if blender_material_nodetree is None:
+        return False
+
+    nodes = get_material_nodes(
+        blender_material_nodetree,
+        [blender_material_nodetree],
+        bpy.types.ShaderNodeGroup,
+    )
+    group_name = get_ds_billboard_node_name().lower()
+    return any(
+        node.node_tree is not None and node.node_tree.name.lower().startswith(group_name)
+        for node, _group_path in nodes
+    )
 
 
 class NodeNav:

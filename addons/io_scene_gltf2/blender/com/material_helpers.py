@@ -31,6 +31,10 @@ def get_gltf_node_name():
     return "glTF Material Output"
 
 
+def get_ds_billboard_node_name():
+    return "DS Billboard Material Output"
+
+
 def create_settings_group(name):
     gltf_node_group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
 
@@ -57,3 +61,11 @@ def create_settings_group(name):
     gltf_node_group_input = gltf_node_group.nodes.new('NodeGroupInput')
     gltf_node_group_input.location = -200, 0
     return gltf_node_group
+
+
+def create_ds_billboard_group(name):
+    billboard_node_group = bpy.data.node_groups.new(name, 'ShaderNodeTree')
+    billboard_node_group.nodes.new('NodeGroupOutput')
+    billboard_node_group_input = billboard_node_group.nodes.new('NodeGroupInput')
+    billboard_node_group_input.location = -200, 0
+    return billboard_node_group

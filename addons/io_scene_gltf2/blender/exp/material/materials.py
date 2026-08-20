@@ -35,6 +35,7 @@ from .extensions.anisotropy import export_anisotropy
 from .extensions.iridescence import export_iridescence
 from .extensions.ior import export_ior
 from .extensions.dispersion import export_dispersion
+from .extensions.billboard import export_billboard, DS_MATERIALS_BILLBOARD_EXTENSION_NAME
 from .search_node_tree import \
     has_image_node_from_socket, \
     get_socket_from_gltf_material_node, \
@@ -305,6 +306,10 @@ def __gather_extensions(bmat, emissive_factor, export_settings):
     uvmap_infos = {}
     udim_infos = {}
 
+    billboard_extension = export_billboard(bmat.material)
+    if billboard_extension:
+        extensions[DS_MATERIALS_BILLBOARD_EXTENSION_NAME] = billboard_extension
+
     # KHR_materials_clearcoat
     clearcoat_extension, uvmap_info, udim_info_clearcoat = export_clearcoat(bmat, export_settings)
     if clearcoat_extension:
@@ -569,11 +574,16 @@ def __export_unlit(bmat, export_settings):
 
     base_color_factor, vc_info = gltf2_unlit.gather_base_color_factor(info, export_settings)
 
+    extensions = {"KHR_materials_unlit": Extension("KHR_materials_unlit", {}, required=False)}
+    billboard_extension = export_billboard(bmat.material)
+    if billboard_extension:
+        extensions[DS_MATERIALS_BILLBOARD_EXTENSION_NAME] = billboard_extension
+
     material = gltf2_io.Material(
         alpha_cutoff=__gather_alpha_cutoff(alpha_info, export_settings),
         alpha_mode=__gather_alpha_mode(alpha_info, export_settings),
         double_sided=__gather_double_sided(bmat, {}, export_settings),
-        extensions={"KHR_materials_unlit": Extension("KHR_materials_unlit", {}, required=False)},
+        extensions=extensions,
         extras=gather_extras(bmat.material, export_settings),
         name=gather_name(bmat, export_settings),
         emissive_factor=None,
