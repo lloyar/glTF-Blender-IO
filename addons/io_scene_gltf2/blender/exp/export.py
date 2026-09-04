@@ -583,21 +583,28 @@ def __is_empty_collection(value):
     return (isinstance(value, dict) or isinstance(value, list)) and len(value) == 0
 
 
+DS_ACTION_TYPE_ANIMATION = "1"
+DS_ACTION_TYPE_CAMERA = "2"
+DS_ACTION_TYPE_MATERIAL_VARIANT = "3"
+
+
 def __write_car_info(gltf_json, export_settings):
     material_variants = gltf_json.get('extensions', {}).get('KHR_materials_variants', {}).get('variants', [])
     material_variants_actions = [
-        {'actionId': to_base64("3\\" + material_variant.get('name', '')),
+        {'actionId': __action_id(DS_ACTION_TYPE_MATERIAL_VARIANT, material_variant.get('name', '')),
          'description': material_variant.get('name', '')} for
         idx, material_variant in enumerate(material_variants)]
 
     animations = gltf_json.get('animations', [])
     animation_actions = [
-        {'actionId': to_base64("1\\" + animation.get('name', '')), 'description': animation.get('name', '')} for
+        {'actionId': __action_id(DS_ACTION_TYPE_ANIMATION, animation.get('name', '')),
+         'description': animation.get('name', '')} for
         animation in animations]
 
     cameras = gltf_json.get('cameras', [])
     camera_actions = [
-        {'actionId': to_base64("2\\" + camera.get('name', '')), 'description': camera.get('name', '')} for
+        {'actionId': __action_id(DS_ACTION_TYPE_CAMERA, camera.get('name', '')),
+         'description': camera.get('name', '')} for
         camera in cameras]
 
     car_info = material_variants_actions + animation_actions + camera_actions
@@ -605,6 +612,31 @@ def __write_car_info(gltf_json, export_settings):
     with open(car_info_path, 'w', encoding='utf8', newline='\n') as file:
         json_lib.dump(car_info, file, ensure_ascii=False, indent=2)
         file.write('\n')
+
+
+def __write_config_info(export_settings):
+    scene = bpy.context.scene
+    configuration = getattr(scene, 'ds_config_info', None)
+    config_info = {
+        'exteriors': __config_action_ids(configuration, 'exteriors', DS_ACTION_TYPE_MATERIAL_VARIANT),
+        'interiors': __config_action_ids(configuration, 'interiors', DS_ACTION_TYPE_MATERIAL_VARIANT),
+        'camera_positions': __config_action_ids(configuration, 'camera_positions', DS_ACTION_TYPE_CAMERA),
+        'animations': __config_action_ids(configuration, 'animations', DS_ACTION_TYPE_ANIMATION),
+    }
+
+    config_info_path = os.path.join(export_settings['gltf_filedirectory'], 'config_info.json')
+    with open(config_info_path, 'w', encoding='utf8', newline='\n') as file:
+        json_lib.dump(config_info, file, ensure_ascii=False, indent=2)
+        file.write('\n')
+
+
+def __action_id(action_type, name):
+    return to_base64(action_type + "\\" + name)
+
+
+def __config_action_ids(configuration, collection_name, action_type):
+    references = getattr(configuration, collection_name, ()) if configuration is not None else ()
+    return [__action_id(action_type, reference.name) for reference in references if reference.name]
 
 
 def to_base64(s: str) -> str:
@@ -807,6 +839,7 @@ def __write_file(json, buffer, export_settings):
         if (export_settings['gltf_use_gltfpack']):
             __postprocess_with_gltfpack(export_settings)
         __write_car_info(json, export_settings)
+        __write_config_info(export_settings)
 
     except AssertionError as e:
         _, _, tb = sys.exc_info()

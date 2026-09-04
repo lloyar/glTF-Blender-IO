@@ -332,6 +332,272 @@ class SCENE_PT_ds_animation_states(bpy.types.Panel):
             operator.target = target
 
 
+################################### DS Config Info #############################
+
+DS_CONFIG_NONE = "__DS_CONFIG_NONE__"
+_ds_config_enum_strings = {}
+_ds_config_reference_targets = [
+    ('exteriors', "Exteriors", ""),
+    ('interiors', "Interiors", ""),
+    ('camera_positions', "Camera Positions", ""),
+    ('animations', "Animations", ""),
+]
+
+
+def _keep_ds_config_enum_string(value):
+    # Blender keeps pointers to strings returned by dynamic EnumProperty callbacks.
+    # Retain every string for the lifetime of the add-on to keep those pointers valid.
+    return _ds_config_enum_strings.setdefault(value, value)
+
+
+def _ds_config_enum_items(names, empty_description):
+    items = [
+        (
+            _keep_ds_config_enum_string(DS_CONFIG_NONE),
+            _keep_ds_config_enum_string("未选择"),
+            _keep_ds_config_enum_string(empty_description),
+        )
+    ]
+    for name in sorted(set(names)):
+        name = _keep_ds_config_enum_string(name)
+        items.append((name, name, ""))
+    return items
+
+
+def _ds_config_scene(context):
+    if context is not None and getattr(context, 'scene', None) is not None:
+        return context.scene
+    return getattr(bpy.context, 'scene', None)
+
+
+def _ds_config_material_variant_names(scene):
+    variants = getattr(scene, 'gltf2_KHR_materials_variants_variants', ()) if scene is not None else ()
+    return {variant.name for variant in variants if variant.name}
+
+
+def _ds_config_camera_names(scene):
+    if scene is None:
+        return []
+    return [
+        obj.data.name for obj in scene.objects
+        if obj.type == 'CAMERA'
+        and obj.data is not None
+        and hasattr(obj.data, 'DSVirtualCameraProperties')
+        and obj.data.name
+    ]
+
+
+def _ds_config_camera_items(self, context):
+    return _ds_config_enum_items(
+        _ds_config_camera_names(_ds_config_scene(context)),
+        "当前场景中没有可用的 DS Virtual Camera",
+    )
+
+
+def _ds_config_animation_names(scene):
+    names = set()
+    if scene is None:
+        return names
+
+    for obj in scene.objects:
+        animation_data = getattr(obj, 'animation_data', None)
+        if animation_data is None:
+            continue
+        for track in animation_data.nla_tracks:
+            if track.name:
+                names.add(track.name)
+    return names
+
+
+def _ds_config_animation_items(self, context):
+    return _ds_config_enum_items(
+        _ds_config_animation_names(_ds_config_scene(context)),
+        "当前场景中没有可用的 NLA 动画轨道",
+    )
+
+
+class DSConfigInfoReferenceProperties(bpy.types.PropertyGroup):
+    name: bpy.props.StringProperty(name="Action Name")
+
+
+class DSConfigInfoProperties(bpy.types.PropertyGroup):
+    exterior: bpy.props.StringProperty(
+        name="车漆",
+        description="选择当前场景中的车漆 Material Variant",
+    )
+    exteriors: bpy.props.CollectionProperty(type=DSConfigInfoReferenceProperties)
+    exteriors_active_index: bpy.props.IntProperty(default=0, min=0)
+    interior: bpy.props.StringProperty(
+        name="内饰",
+        description="选择当前场景中的内饰 Material Variant",
+    )
+    interiors: bpy.props.CollectionProperty(type=DSConfigInfoReferenceProperties)
+    interiors_active_index: bpy.props.IntProperty(default=0, min=0)
+    camera_position: bpy.props.EnumProperty(
+        name="DS Virtual Camera",
+        description="选择当前场景中的 DS Virtual Camera",
+        items=_ds_config_camera_items,
+    )
+    camera_positions: bpy.props.CollectionProperty(type=DSConfigInfoReferenceProperties)
+    camera_positions_active_index: bpy.props.IntProperty(default=0, min=0)
+    animation: bpy.props.EnumProperty(
+        name="动画",
+        description="选择当前场景中的 NLA 动画轨道",
+        items=_ds_config_animation_items,
+    )
+    animations: bpy.props.CollectionProperty(type=DSConfigInfoReferenceProperties)
+    animations_active_index: bpy.props.IntProperty(default=0, min=0)
+
+
+class SCENE_UL_ds_config_references(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.label(text=item.name)
+
+
+class SCENE_OT_ds_config_reference_add(bpy.types.Operator):
+    bl_idname = "scene.ds_config_reference_add"
+    bl_label = "添加 Action"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    target: bpy.props.EnumProperty(items=_ds_config_reference_targets)
+
+    def execute(self, context):
+        configuration = context.scene.ds_config_info
+        if self.target == 'exteriors':
+            selection = configuration.exterior
+            available_names = _ds_config_material_variant_names(context.scene)
+        elif self.target == 'interiors':
+            selection = configuration.interior
+            available_names = _ds_config_material_variant_names(context.scene)
+        elif self.target == 'camera_positions':
+            selection = configuration.camera_position
+            available_names = _ds_config_camera_names(context.scene)
+        else:
+            selection = configuration.animation
+            available_names = _ds_config_animation_names(context.scene)
+
+        if not selection or selection == DS_CONFIG_NONE or selection not in available_names:
+            self.report({'WARNING'}, "请先选择当前场景中的有效 Action")
+            return {'CANCELLED'}
+
+        references = getattr(configuration, self.target)
+        if selection in {reference.name for reference in references}:
+            self.report({'WARNING'}, "该 Action 已存在于列表中")
+            return {'CANCELLED'}
+
+        references.add().name = selection
+        setattr(configuration, self.target + '_active_index', len(references) - 1)
+        return {'FINISHED'}
+
+
+class SCENE_OT_ds_config_reference_remove(bpy.types.Operator):
+    bl_idname = "scene.ds_config_reference_remove"
+    bl_label = "删除 Action"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    target: bpy.props.EnumProperty(items=_ds_config_reference_targets)
+
+    def execute(self, context):
+        configuration = context.scene.ds_config_info
+        references = getattr(configuration, self.target)
+        if not references:
+            return {'CANCELLED'}
+
+        active_index_name = self.target + '_active_index'
+        index = min(getattr(configuration, active_index_name), len(references) - 1)
+        references.remove(index)
+        setattr(configuration, active_index_name, max(0, min(index, len(references) - 1)))
+        return {'FINISHED'}
+
+
+class SCENE_PT_ds_config_info(bpy.types.Panel):
+    bl_label = "车型信息配置表"
+    bl_idname = "SCENE_PT_ds_config_info"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'scene'
+
+    @staticmethod
+    def _draw_reference_list(
+            layout,
+            scene,
+            configuration,
+            label,
+            target,
+            selection,
+            search_property=None):
+        box = layout.box()
+        box.label(text=label)
+
+        row = box.row(align=True)
+        if search_property is None:
+            row.prop(configuration, selection, text="")
+        elif hasattr(scene, search_property):
+            row.prop_search(configuration, selection, scene, search_property, text="")
+        else:
+            row.enabled = False
+            row.prop(configuration, selection, text="")
+        operator = row.operator("scene.ds_config_reference_add", icon='ADD', text="")
+        operator.target = target
+
+        row = box.row()
+        row.template_list(
+            "SCENE_UL_ds_config_references",
+            target,
+            configuration,
+            target,
+            configuration,
+            target + '_active_index',
+            rows=3,
+        )
+        column = row.column(align=True)
+        operator = column.operator("scene.ds_config_reference_remove", icon='REMOVE', text="")
+        operator.target = target
+
+        if search_property is not None and not hasattr(scene, search_property):
+            box.label(text="请先在 glTF 插件设置中启用 Material Variants", icon='INFO')
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        configuration = scene.ds_config_info
+
+        self._draw_reference_list(
+            layout,
+            scene,
+            configuration,
+            "车漆",
+            'exteriors',
+            'exterior',
+            'gltf2_KHR_materials_variants_variants',
+        )
+        self._draw_reference_list(
+            layout,
+            scene,
+            configuration,
+            "内饰",
+            'interiors',
+            'interior',
+            'gltf2_KHR_materials_variants_variants',
+        )
+        self._draw_reference_list(
+            layout,
+            scene,
+            configuration,
+            "相机位置",
+            'camera_positions',
+            'camera_position',
+        )
+        self._draw_reference_list(
+            layout,
+            scene,
+            configuration,
+            "动画",
+            'animations',
+            'animation',
+        )
+
+
 ################################### KHR_materials_variants ####################
 
 # Global UI panel
@@ -1063,9 +1329,16 @@ def register():
     bpy.utils.register_class(SCENE_OT_ds_animation_reference_add)
     bpy.utils.register_class(SCENE_OT_ds_animation_reference_remove)
     bpy.utils.register_class(SCENE_PT_ds_animation_states)
+    bpy.utils.register_class(DSConfigInfoReferenceProperties)
+    bpy.utils.register_class(DSConfigInfoProperties)
+    bpy.utils.register_class(SCENE_UL_ds_config_references)
+    bpy.utils.register_class(SCENE_OT_ds_config_reference_add)
+    bpy.utils.register_class(SCENE_OT_ds_config_reference_remove)
+    bpy.utils.register_class(SCENE_PT_ds_config_info)
     bpy.types.Scene.ds_environment_map = bpy.props.PointerProperty(type=DSEnvironmentMapProperties)
     bpy.types.Scene.ds_animation_states = bpy.props.CollectionProperty(type=DSAnimationStateProperties)
     bpy.types.Scene.ds_animation_state_active_index = bpy.props.IntProperty(default=0, min=0)
+    bpy.types.Scene.ds_config_info = bpy.props.PointerProperty(type=DSConfigInfoProperties)
     bpy.types.NODE_MT_category_shader_output.append(add_gltf_settings_to_menu)
     action_filter_register()
 
@@ -1099,9 +1372,16 @@ def variant_register():
 
 def unregister():
     bpy.types.NODE_MT_category_shader_output.remove(add_gltf_settings_to_menu)
+    del bpy.types.Scene.ds_config_info
     del bpy.types.Scene.ds_animation_state_active_index
     del bpy.types.Scene.ds_animation_states
     del bpy.types.Scene.ds_environment_map
+    bpy.utils.unregister_class(SCENE_PT_ds_config_info)
+    bpy.utils.unregister_class(SCENE_OT_ds_config_reference_remove)
+    bpy.utils.unregister_class(SCENE_OT_ds_config_reference_add)
+    bpy.utils.unregister_class(SCENE_UL_ds_config_references)
+    bpy.utils.unregister_class(DSConfigInfoProperties)
+    bpy.utils.unregister_class(DSConfigInfoReferenceProperties)
     bpy.utils.unregister_class(SCENE_PT_ds_animation_states)
     bpy.utils.unregister_class(SCENE_OT_ds_animation_reference_remove)
     bpy.utils.unregister_class(SCENE_OT_ds_animation_reference_add)
