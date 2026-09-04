@@ -586,7 +586,7 @@ def __is_empty_collection(value):
 def __write_car_info(gltf_json, export_settings):
     material_variants = gltf_json.get('extensions', {}).get('KHR_materials_variants', {}).get('variants', [])
     material_variants_actions = [
-        {'actionId': to_base64("0\\" + str(idx) + "\\" + material_variant.get('name', '')),
+        {'actionId': to_base64("3\\" + material_variant.get('name', '')),
          'description': material_variant.get('name', '')} for
         idx, material_variant in enumerate(material_variants)]
 
