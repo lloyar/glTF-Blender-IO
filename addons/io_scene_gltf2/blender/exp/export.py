@@ -40,30 +40,38 @@ def save(context, export_settings):
             bpy.ops.object.mode_set(mode='OBJECT')
 
     original_frame = bpy.context.scene.frame_current
-    if not export_settings['gltf_current_frame']:
-        bpy.context.scene.frame_set(0)
+    # Sampling temporarily enables actions and muted NLA tracks. Blender keeps
+    # their last hide_render value after they are disabled again, so restoring
+    # the frame alone cannot restore the scene's original visibility.
+    original_visibility = [(obj, obj.hide_render) for obj in bpy.data.objects]
+    try:
+        if not export_settings['gltf_current_frame']:
+            bpy.context.scene.frame_set(0)
 
-    __notify_start(context, export_settings)
-    start_time = time.time()
-    pre_export_callbacks = export_settings["pre_export_callbacks"]
-    for callback in pre_export_callbacks:
-        callback(export_settings)
+        __notify_start(context, export_settings)
+        start_time = time.time()
+        pre_export_callbacks = export_settings["pre_export_callbacks"]
+        for callback in pre_export_callbacks:
+            callback(export_settings)
 
-    json, buffer = __export(export_settings)
-    __append_animation_states_extension(json, export_settings)
-    if ibl.is_supported_platform():
-        buffer = __export_environment_map(json, buffer, export_settings)
+        json, buffer = __export(export_settings)
+        __append_animation_states_extension(json, export_settings)
+        if ibl.is_supported_platform():
+            buffer = __export_environment_map(json, buffer, export_settings)
 
-    post_export_callbacks = export_settings["post_export_callbacks"]
-    for callback in post_export_callbacks:
-        callback(export_settings)
-    __write_file(json, buffer, export_settings)
+        post_export_callbacks = export_settings["post_export_callbacks"]
+        for callback in post_export_callbacks:
+            callback(export_settings)
+        __write_file(json, buffer, export_settings)
 
-    end_time = time.time()
-    __notify_end(context, end_time - start_time, export_settings)
-
-    if not export_settings['gltf_current_frame']:
-        bpy.context.scene.frame_set(int(original_frame))
+        end_time = time.time()
+        __notify_end(context, end_time - start_time, export_settings)
+    finally:
+        if not export_settings['gltf_current_frame']:
+            bpy.context.scene.frame_set(int(original_frame))
+        for obj, hide_render in original_visibility:
+            if obj.hide_render != hide_render:
+                obj.hide_render = hide_render
 
     return {'FINISHED'}
 

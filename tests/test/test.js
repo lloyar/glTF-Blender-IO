@@ -52,7 +52,7 @@ function blenderFileToGltf(blenderVersion, blenderPath, outDirName, done, option
 
 function runBlenderScript(blenderVersion, scriptPath, done) {
     const { exec } = require('child_process');
-    const cmd = `${blenderVersion} --factory-startup -b -noaudio --python ${scriptPath}`;
+    const cmd = `${blenderVersion} --factory-startup -b -noaudio --python-exit-code 1 --python ${scriptPath}`;
     exec(cmd, (error) => done(error));
 }
 
@@ -251,6 +251,10 @@ describe('Exporter', function () {
     blenderVersions.forEach(function (blenderVersion) {
         it(blenderVersion + '_nla_track_state_restore', function (done) {
             runBlenderScript(blenderVersion, 'nla_track_state_restore.py', done);
+        });
+
+        it(blenderVersion + '_visibility_state_restore', function (done) {
+            runBlenderScript(blenderVersion, 'visibility_state_restore.py', done);
         });
 
         let variants = [
